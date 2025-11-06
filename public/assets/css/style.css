@@ -55,6 +55,17 @@ button {
     cursor: not-allowed;
 }
 
+#waveform,
+#accumulated-waveform {
+    display: block;
+    margin: 0 auto 20px auto;
+    border: 1px solid #ccc;
+}
+
+#waveform {
+    margin-top: 20px;
+}
+
 #view1 {
     display: block;
     margin: 20px auto;
