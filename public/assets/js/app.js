@@ -1078,6 +1078,14 @@ function bindOverviewWaveformInteractions(canvas) {
     var isInViewWindow = false;
     var activePointerId = null;
     
+    // 邊緣拉伸相關變數
+    var isResizing = false;
+    var resizeEdge = null; // 'left' 或 'right'
+    var resizeStartX = 0;
+    var resizeStartViewStart = 0;
+    var resizeStartVisibleSamples = 0;
+    var edgeThreshold = 10; // 邊緣檢測閾值（畫素）
+    
     // 檢查點擊位置是否在視窗指示器內
     function isInsideViewWindow(clientX) {
         if (!accumulatedWaveform || !accumulatedWaveform.sampleCount) {
@@ -1096,6 +1104,60 @@ function bindOverviewWaveformInteractions(canvas) {
         return clickX >= viewStartX && clickX <= (viewStartX + viewWidth);
     }
     
+    // 檢查是否在視窗邊緣
+    function getResizeEdge(clientX) {
+        if (!accumulatedWaveform || !accumulatedWaveform.sampleCount) {
+            return null;
+        }
+        
+        var rect = canvas.getBoundingClientRect();
+        var clickX = clientX - rect.left;
+        var sampleCount = accumulatedWaveform.sampleCount;
+        var viewStart = accumulatedWaveform.viewStart;
+        var visibleSamples = accumulatedWaveform.getVisibleSamples();
+        
+        var viewStartX = (viewStart / sampleCount) * rect.width;
+        var viewEndX = ((viewStart + visibleSamples) / sampleCount) * rect.width;
+        
+        // 檢查是否在左邊緣
+        if (Math.abs(clickX - viewStartX) <= edgeThreshold) {
+            return 'left';
+        }
+        
+        // 檢查是否在右邊緣
+        if (Math.abs(clickX - viewEndX) <= edgeThreshold) {
+            return 'right';
+        }
+        
+        return null;
+    }
+    
+    // 更新鼠標樣式
+    function updateCursor(clientX) {
+        if (!accumulatedWaveform || !accumulatedWaveform.sampleCount) {
+            canvas.style.cursor = 'default';
+            return;
+        }
+        
+        if (isDragging) {
+            if (isResizing) {
+                canvas.style.cursor = 'ew-resize';
+            } else {
+                canvas.style.cursor = 'grabbing';
+            }
+            return;
+        }
+        
+        var edge = getResizeEdge(clientX);
+        if (edge) {
+            canvas.style.cursor = 'ew-resize';
+        } else if (isInsideViewWindow(clientX)) {
+            canvas.style.cursor = 'grab';
+        } else {
+            canvas.style.cursor = 'pointer';
+        }
+    }
+    
     canvas.addEventListener('pointerdown', function(event) {
         if (!accumulatedWaveform || !accumulatedWaveform.sampleCount) {
             return;
@@ -1108,22 +1170,35 @@ function bindOverviewWaveformInteractions(canvas) {
         activePointerId = event.pointerId;
         dragStartX = clickX;
         dragStartViewStart = accumulatedWaveform.viewStart;
-        isInViewWindow = isInsideViewWindow(event.clientX);
         
-        // 如果點擊在視窗外，立即跳轉到該位置
-        if (!isInViewWindow) {
-            var clickRatio = clickX / rect.width;
-            var targetSample = Math.floor(clickRatio * accumulatedWaveform.sampleCount);
-            var visibleSamples = accumulatedWaveform.getVisibleSamples();
-            accumulatedWaveform.viewStart = Math.floor(targetSample - visibleSamples / 2);
-            accumulatedWaveform.isAutoScroll = false;
-            accumulatedWaveform._enforceViewBounds();
-            accumulatedWaveform.draw();
+        // 檢查是否在邊緣進行拉伸
+        var edge = getResizeEdge(event.clientX);
+        if (edge) {
+            isResizing = true;
+            resizeEdge = edge;
+            resizeStartX = clickX;
+            resizeStartViewStart = accumulatedWaveform.viewStart;
+            resizeStartVisibleSamples = accumulatedWaveform.getVisibleSamples();
+        } else {
+            isResizing = false;
+            resizeEdge = null;
+            isInViewWindow = isInsideViewWindow(event.clientX);
             
-            // 更新拖動起始位置
-            dragStartX = clickX;
-            dragStartViewStart = accumulatedWaveform.viewStart;
-            isInViewWindow = true;
+            // 如果點擊在視窗外，立即跳轉到該位置
+            if (!isInViewWindow) {
+                var clickRatio = clickX / rect.width;
+                var targetSample = Math.floor(clickRatio * accumulatedWaveform.sampleCount);
+                var visibleSamples = accumulatedWaveform.getVisibleSamples();
+                accumulatedWaveform.viewStart = Math.floor(targetSample - visibleSamples / 2);
+                accumulatedWaveform.isAutoScroll = false;
+                accumulatedWaveform._enforceViewBounds();
+                accumulatedWaveform.draw();
+                
+                // 更新拖動起始位置
+                dragStartX = clickX;
+                dragStartViewStart = accumulatedWaveform.viewStart;
+                isInViewWindow = true;
+            }
         }
         
         try {
@@ -1132,8 +1207,7 @@ function bindOverviewWaveformInteractions(canvas) {
             // ignore if not supported
         }
         
-        // 改變鼠標樣式
-        canvas.style.cursor = 'grabbing';
+        updateCursor(event.clientX);
     });
     
     canvas.addEventListener('pointermove', function(event) {
@@ -1145,11 +1219,7 @@ function bindOverviewWaveformInteractions(canvas) {
         
         // 更新鼠標樣式
         if (!isDragging) {
-            if (isInsideViewWindow(event.clientX)) {
-                canvas.style.cursor = 'grab';
-            } else {
-                canvas.style.cursor = 'pointer';
-            }
+            updateCursor(event.clientX);
         }
         
         if (!isDragging || event.pointerId !== activePointerId) {
@@ -1157,17 +1227,68 @@ function bindOverviewWaveformInteractions(canvas) {
         }
         
         var currentX = event.clientX - rect.left;
-        var deltaX = currentX - dragStartX;
-        
-        // 將畫素位移轉換為樣本位移
+        var deltaX = currentX - (isResizing ? resizeStartX : dragStartX);
         var sampleCount = accumulatedWaveform.sampleCount;
-        var deltaSamples = Math.floor((deltaX / rect.width) * sampleCount);
         
-        // 更新視窗位置
-        accumulatedWaveform.viewStart = dragStartViewStart + deltaSamples;
-        accumulatedWaveform.isAutoScroll = false;
-        accumulatedWaveform._enforceViewBounds();
-        accumulatedWaveform.draw();
+        if (isResizing) {
+            // 處理邊緣拉伸
+            var deltaSamples = Math.floor((deltaX / rect.width) * sampleCount);
+            
+            if (resizeEdge === 'left') {
+                // 拉伸左邊緣：調整 viewStart 和 visibleSamples
+                var newViewStart = resizeStartViewStart + deltaSamples;
+                var newVisibleSamples = resizeStartVisibleSamples - deltaSamples;
+                
+                // 限制最小可視範圍
+                var minVisible = accumulatedWaveform._getMinVisibleSamples(sampleCount);
+                if (newVisibleSamples < minVisible) {
+                    newVisibleSamples = minVisible;
+                    newViewStart = resizeStartViewStart + resizeStartVisibleSamples - minVisible;
+                }
+                
+                // 確保不超出邊界
+                if (newViewStart < 0) {
+                    newVisibleSamples += newViewStart;
+                    newViewStart = 0;
+                }
+                
+                if (newVisibleSamples > 0) {
+                    accumulatedWaveform.viewStart = newViewStart;
+                    accumulatedWaveform.zoomFactor = sampleCount / newVisibleSamples;
+                }
+            } else if (resizeEdge === 'right') {
+                // 拉伸右邊緣：只調整 visibleSamples
+                var newVisibleSamples = resizeStartVisibleSamples + deltaSamples;
+                
+                // 限制最小可視範圍
+                var minVisible = accumulatedWaveform._getMinVisibleSamples(sampleCount);
+                if (newVisibleSamples < minVisible) {
+                    newVisibleSamples = minVisible;
+                }
+                
+                // 確保不超出邊界
+                var maxEnd = sampleCount - resizeStartViewStart;
+                if (newVisibleSamples > maxEnd) {
+                    newVisibleSamples = maxEnd;
+                }
+                
+                if (newVisibleSamples > 0) {
+                    accumulatedWaveform.zoomFactor = sampleCount / newVisibleSamples;
+                }
+            }
+            
+            accumulatedWaveform.isAutoScroll = false;
+            accumulatedWaveform._enforceViewBounds();
+            accumulatedWaveform.draw();
+        } else {
+            // 處理視窗拖動
+            var deltaSamples = Math.floor((deltaX / rect.width) * sampleCount);
+            
+            accumulatedWaveform.viewStart = dragStartViewStart + deltaSamples;
+            accumulatedWaveform.isAutoScroll = false;
+            accumulatedWaveform._enforceViewBounds();
+            accumulatedWaveform.draw();
+        }
     });
     
     function endDrag(event) {
@@ -1176,6 +1297,9 @@ function bindOverviewWaveformInteractions(canvas) {
         }
         
         isDragging = false;
+        isResizing = false;
+        resizeEdge = null;
+        
         if (activePointerId !== null) {
             try {
                 canvas.releasePointerCapture(activePointerId);
@@ -1186,14 +1310,8 @@ function bindOverviewWaveformInteractions(canvas) {
         activePointerId = null;
         
         // 恢復鼠標樣式
-        if (accumulatedWaveform && accumulatedWaveform.sampleCount) {
-            var rect = canvas.getBoundingClientRect();
-            var currentX = event ? event.clientX : 0;
-            if (isInsideViewWindow(currentX)) {
-                canvas.style.cursor = 'grab';
-            } else {
-                canvas.style.cursor = 'pointer';
-            }
+        if (event) {
+            updateCursor(event.clientX);
         } else {
             canvas.style.cursor = 'default';
         }
@@ -1208,12 +1326,8 @@ function bindOverviewWaveformInteractions(canvas) {
     });
     
     canvas.addEventListener('pointerenter', function(event) {
-        if (!isDragging && accumulatedWaveform && accumulatedWaveform.sampleCount) {
-            if (isInsideViewWindow(event.clientX)) {
-                canvas.style.cursor = 'grab';
-            } else {
-                canvas.style.cursor = 'pointer';
-            }
+        if (!isDragging) {
+            updateCursor(event.clientX);
         }
     });
 }
