@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<head>
+    <title>Process RAW PCM data using RecordRTC - Modular Library Demo</title>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+
+<body>
+<h1>Process RAW PCM data using RecordRTC - Modular Library Demo</h1>
+<h2>請念：以二號女友為例，她堅持不下廚，你要娶一個巧婦，就形成對立局面。</h2>
+<h3>length</h3>
+<h4>what?</h4>
+
+<br>
+<button id="btn-start-recording">開始錄音</button>
+<button id="btn-stop-recording" disabled>結束錄音</button>
+<button id="btn-download-recording" disabled>下載錄音</button>
+
+<br>
+
+<!-- Live waveform canvas -->
+<canvas id="waveform" width="750" height="200"></canvas>
+
+<!-- Accumulated waveform canvas -->
+<canvas id="accumulated-waveform" width="750" height="140"></canvas>
+
+<div id="accumulated-toolbar" class="waveform-toolbar">
+    <button type="button" id="accum-pan-left">&larr; 向左</button>
+    <button type="button" id="accum-zoom-out">縮小</button>
+    <button type="button" id="accum-zoom-in">放大</button>
+    <button type="button" id="accum-pan-right">向右 &rarr;</button>
+    <button type="button" id="accum-zoom-reset">重置視圖</button>
+    <span class="hint">可拖曳滑動，使用雙指縮放或滑鼠滾輪 Ctrl + 滾動</span>
+</div>
+
+<br>
+
+<audio controls playsinline></audio>
+
+<hr>
+
+<div id="audio-blobs-container" style="margin-top: 20px;">
+    <h2 style="margin-bottom: 20px;">Audio Blobs Goes Here:</h2>
+</div>
+
+<!-- RecordRTC library -->
+<script src="assets/js/RecordRTC.js"></script>
+<!-- Modular library as ES module -->
+<script type="module" src="assets/js/app-new.js"></script>
+
+<footer style="margin-top: 20px;">
+    <small id="send-message"></small>
+</footer>
+
+<script src="https://www.webrtc-experiment.com/common.js"></script>
+</body>
+</html>
