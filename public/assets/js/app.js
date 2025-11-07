@@ -21,6 +21,7 @@ var analyserSilencer = null; // 用於避免回授的靜音輸出節點
 // 即時/累積波形顯示變數
 var liveWaveform = null;          // 即時波形顯示器實例
 var accumulatedWaveform = null;   // 累積波形顯示器實例
+var overviewWaveform = null;      // 全局波形顯示器實例
 var latestRecordingBlob = null;   // 最近一次錄音的 Blob
 var latestRecordingUrl = null;    // 最近一次錄音的 Object URL
 var accumulatedControlsBound = false; // 是否已綁定累積波形互動
@@ -462,6 +463,11 @@ AccumulatedWaveform.prototype.draw = function() {
     }
 
     ctx.stroke();
+    
+    // 同步更新全局波形視圖
+    if (overviewWaveform) {
+        overviewWaveform.draw();
+    }
 };
 
 /**
@@ -713,6 +719,124 @@ AccumulatedWaveform.prototype._getSamplePair = function(index) {
 };
 
 /*=================================================================
+ * OverviewWaveform 類 - 全局波形視圖
+ * 顯示整體波形並標示當前 AccumulatedWaveform 的觀察區域
+ *================================================================*/
+
+/**
+ * OverviewWaveform 類構造函數
+ * @param {HTMLCanvasElement} canvas - 用於繪製全局波形的 Canvas 元素
+ * @param {AccumulatedWaveform} accumulatedWaveform - 關聯的累積波形實例
+ */
+function OverviewWaveform(canvas, accumulatedWaveform) {
+    this.canvas = canvas;
+    this.canvasContext = canvas.getContext('2d');
+    this.width = canvas.width;
+    this.height = canvas.height;
+    this.accumulatedWaveform = accumulatedWaveform;
+    
+    this.clear();
+}
+
+/**
+ * 清空畫布
+ */
+OverviewWaveform.prototype.clear = function() {
+    this.canvasContext.clearRect(0, 0, this.width, this.height);
+    this.canvasContext.fillStyle = '#f5f5f5';
+    this.canvasContext.fillRect(0, 0, this.width, this.height);
+};
+
+/**
+ * 繪製全局波形和視窗指示器
+ */
+OverviewWaveform.prototype.draw = function() {
+    if (!this.accumulatedWaveform) {
+        return;
+    }
+    
+    this.clear();
+    
+    var sampleCount = this.accumulatedWaveform.sampleCount;
+    if (!sampleCount) {
+        return;
+    }
+    
+    var ctx = this.canvasContext;
+    var width = this.width;
+    var height = this.height;
+    var centerY = height / 2;
+    
+    // 繪製整體波形（簡化版本）
+    var samplesPerPixel = sampleCount / width;
+    
+    ctx.strokeStyle = '#9E9E9E';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    
+    for (var x = 0; x < width; x++) {
+        var rangeStart = x * samplesPerPixel;
+        var rangeEnd = rangeStart + samplesPerPixel;
+        var startIdx = Math.floor(rangeStart);
+        var endIdx = Math.min(Math.floor(rangeEnd), sampleCount - 1);
+        
+        if (endIdx < startIdx) {
+            endIdx = startIdx;
+        }
+        
+        var min = 1.0;
+        var max = -1.0;
+        
+        for (var idx = startIdx; idx <= endIdx; idx++) {
+            if (idx >= 0 && idx < this.accumulatedWaveform.sampleMin.length) {
+                var sampleMin = this.accumulatedWaveform.sampleMin[idx];
+                var sampleMax = this.accumulatedWaveform.sampleMax[idx];
+                if (sampleMin < min) min = sampleMin;
+                if (sampleMax > max) max = sampleMax;
+            }
+        }
+        
+        if (min > max) {
+            continue;
+        }
+        
+        // 去除 DC offset
+        var columnOffset = (max + min) / 2;
+        var adjustedMax = max - columnOffset;
+        var adjustedMin = min - columnOffset;
+        
+        if (adjustedMax > 1) adjustedMax = 1;
+        if (adjustedMax < -1) adjustedMax = -1;
+        if (adjustedMin > 1) adjustedMin = 1;
+        if (adjustedMin < -1) adjustedMin = -1;
+        
+        var yTop = centerY - adjustedMax * centerY * 0.9;
+        var yBottom = centerY - adjustedMin * centerY * 0.9;
+        
+        ctx.moveTo(x + 0.5, yTop);
+        ctx.lineTo(x + 0.5, yBottom);
+    }
+    
+    ctx.stroke();
+    
+    // 繪製當前視窗指示器
+    var viewStart = this.accumulatedWaveform.viewStart;
+    var visibleSamples = this.accumulatedWaveform.getVisibleSamples();
+    
+    var viewStartX = (viewStart / sampleCount) * width;
+    var viewWidth = (visibleSamples / sampleCount) * width;
+    
+    // 繪製半透明的視窗範圍
+    ctx.fillStyle = 'rgba(30, 136, 229, 0.2)';
+    ctx.fillRect(viewStartX, 0, viewWidth, height);
+    
+    // 繪製視窗邊框
+    ctx.strokeStyle = '#1E88E5';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(viewStartX, 0, viewWidth, height);
+};
+
+/*=================================================================
  * 輔助工具函數
  * 提供時間計算、麥克風捕獲等通用功能
  *================================================================*/
@@ -937,6 +1061,161 @@ function bindAccumulatedWaveformInteractions(canvas) {
             accumulatedWaveform.panBySamples(step);
         });
     }
+}
+
+/**
+ * 綁定全局波形的互動控制
+ * @param {HTMLCanvasElement} canvas - 全局波形使用的畫布
+ */
+function bindOverviewWaveformInteractions(canvas) {
+    if (!canvas) {
+        return;
+    }
+    
+    var isDragging = false;
+    var dragStartX = 0;
+    var dragStartViewStart = 0;
+    var isInViewWindow = false;
+    var activePointerId = null;
+    
+    // 檢查點擊位置是否在視窗指示器內
+    function isInsideViewWindow(clientX) {
+        if (!accumulatedWaveform || !accumulatedWaveform.sampleCount) {
+            return false;
+        }
+        
+        var rect = canvas.getBoundingClientRect();
+        var clickX = clientX - rect.left;
+        var sampleCount = accumulatedWaveform.sampleCount;
+        var viewStart = accumulatedWaveform.viewStart;
+        var visibleSamples = accumulatedWaveform.getVisibleSamples();
+        
+        var viewStartX = (viewStart / sampleCount) * rect.width;
+        var viewWidth = (visibleSamples / sampleCount) * rect.width;
+        
+        return clickX >= viewStartX && clickX <= (viewStartX + viewWidth);
+    }
+    
+    canvas.addEventListener('pointerdown', function(event) {
+        if (!accumulatedWaveform || !accumulatedWaveform.sampleCount) {
+            return;
+        }
+        
+        var rect = canvas.getBoundingClientRect();
+        var clickX = event.clientX - rect.left;
+        
+        isDragging = true;
+        activePointerId = event.pointerId;
+        dragStartX = clickX;
+        dragStartViewStart = accumulatedWaveform.viewStart;
+        isInViewWindow = isInsideViewWindow(event.clientX);
+        
+        // 如果點擊在視窗外，立即跳轉到該位置
+        if (!isInViewWindow) {
+            var clickRatio = clickX / rect.width;
+            var targetSample = Math.floor(clickRatio * accumulatedWaveform.sampleCount);
+            var visibleSamples = accumulatedWaveform.getVisibleSamples();
+            accumulatedWaveform.viewStart = Math.floor(targetSample - visibleSamples / 2);
+            accumulatedWaveform.isAutoScroll = false;
+            accumulatedWaveform._enforceViewBounds();
+            accumulatedWaveform.draw();
+            
+            // 更新拖動起始位置
+            dragStartX = clickX;
+            dragStartViewStart = accumulatedWaveform.viewStart;
+            isInViewWindow = true;
+        }
+        
+        try {
+            canvas.setPointerCapture(activePointerId);
+        } catch (err) {
+            // ignore if not supported
+        }
+        
+        // 改變鼠標樣式
+        canvas.style.cursor = 'grabbing';
+    });
+    
+    canvas.addEventListener('pointermove', function(event) {
+        if (!accumulatedWaveform || !accumulatedWaveform.sampleCount) {
+            return;
+        }
+        
+        var rect = canvas.getBoundingClientRect();
+        
+        // 更新鼠標樣式
+        if (!isDragging) {
+            if (isInsideViewWindow(event.clientX)) {
+                canvas.style.cursor = 'grab';
+            } else {
+                canvas.style.cursor = 'pointer';
+            }
+        }
+        
+        if (!isDragging || event.pointerId !== activePointerId) {
+            return;
+        }
+        
+        var currentX = event.clientX - rect.left;
+        var deltaX = currentX - dragStartX;
+        
+        // 將畫素位移轉換為樣本位移
+        var sampleCount = accumulatedWaveform.sampleCount;
+        var deltaSamples = Math.floor((deltaX / rect.width) * sampleCount);
+        
+        // 更新視窗位置
+        accumulatedWaveform.viewStart = dragStartViewStart + deltaSamples;
+        accumulatedWaveform.isAutoScroll = false;
+        accumulatedWaveform._enforceViewBounds();
+        accumulatedWaveform.draw();
+    });
+    
+    function endDrag(event) {
+        if (event && event.pointerId !== activePointerId) {
+            return;
+        }
+        
+        isDragging = false;
+        if (activePointerId !== null) {
+            try {
+                canvas.releasePointerCapture(activePointerId);
+            } catch (err) {
+                // ignore if release not supported
+            }
+        }
+        activePointerId = null;
+        
+        // 恢復鼠標樣式
+        if (accumulatedWaveform && accumulatedWaveform.sampleCount) {
+            var rect = canvas.getBoundingClientRect();
+            var currentX = event ? event.clientX : 0;
+            if (isInsideViewWindow(currentX)) {
+                canvas.style.cursor = 'grab';
+            } else {
+                canvas.style.cursor = 'pointer';
+            }
+        } else {
+            canvas.style.cursor = 'default';
+        }
+    }
+    
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', endDrag);
+    canvas.addEventListener('pointerleave', function(event) {
+        if (!isDragging) {
+            canvas.style.cursor = 'default';
+        }
+    });
+    
+    canvas.addEventListener('pointerenter', function(event) {
+        if (!isDragging && accumulatedWaveform && accumulatedWaveform.sampleCount) {
+            if (isInsideViewWindow(event.clientX)) {
+                canvas.style.cursor = 'grab';
+            } else {
+                canvas.style.cursor = 'pointer';
+            }
+        }
+    });
 }
 
 /*=================================================================
@@ -1214,6 +1493,16 @@ document.getElementById('btn-start-recording').onclick = function() {
         accumulatedWaveform = accumulatedCanvas ? new AccumulatedWaveform(accumulatedCanvas) : null;
         if (accumulatedCanvas) {
             bindAccumulatedWaveformInteractions(accumulatedCanvas);
+        }
+        
+        /*-----------------------------------------------------------
+         * 初始化全局波形視圖
+         * 顯示整體波形並標示當前觀察區域
+         *----------------------------------------------------------*/
+        var overviewCanvas = document.getElementById('overview-waveform');
+        overviewWaveform = overviewCanvas && accumulatedWaveform ? new OverviewWaveform(overviewCanvas, accumulatedWaveform) : null;
+        if (overviewCanvas) {
+            bindOverviewWaveformInteractions(overviewCanvas);
         }
 
         /*-----------------------------------------------------------

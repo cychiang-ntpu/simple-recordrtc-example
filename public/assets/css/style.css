@@ -56,7 +56,8 @@ button {
 }
 
 #waveform,
-#accumulated-waveform {
+#accumulated-waveform,
+#overview-waveform {
     display: block;
     margin: 0 auto 20px auto;
     border: 1px solid #ccc;
@@ -64,6 +65,16 @@ button {
 
 #waveform {
     margin-top: 20px;
+}
+
+#overview-waveform {
+    cursor: pointer;
+    border: 2px solid #1E88E5;
+    background-color: #f5f5f5;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
 }
 
 .waveform-toolbar {
