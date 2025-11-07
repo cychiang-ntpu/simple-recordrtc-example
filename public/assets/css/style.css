@@ -348,21 +348,76 @@ html {
         grid-column: 1 / -1;
     }
     
-    /* 播放按鈕特殊樣式 */
-    #accum-play-selection {
+    /* 主播放控制按鈕樣式 */
+    #btn-play {
         background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-        color: white;
-        font-weight: bold;
-        grid-column: 1 / -1;
+        color: #fff;
+        font-weight: 700;
     }
-    
-    #accum-play-selection:hover:not(:disabled) {
+    #btn-play:hover:not(:disabled) {
         background: linear-gradient(135deg, #45a049 0%, #388e3c 100%);
         transform: translateY(-1px);
     }
-    
-    #accum-play-selection:active:not(:disabled) {
+    #btn-play:active:not(:disabled) {
         background: linear-gradient(135deg, #388e3c 0%, #2e7d32 100%);
+    }
+    #btn-play:disabled {
+        opacity: .5;
+        cursor: not-allowed;
+    }
+
+    /* 暫停按鈕樣式 */
+    #btn-pause {
+        background: linear-gradient(135deg, #ffb347 0%, #ff9800 100%);
+        color: #fff;
+        font-weight: 700;
+    }
+    #btn-pause:hover:not(:disabled) {
+        background: linear-gradient(135deg, #ff9800 0%, #fb8c00 100%);
+        transform: translateY(-1px);
+    }
+    #btn-pause:active:not(:disabled) {
+        background: linear-gradient(135deg, #fb8c00 0%, #ef6c00 100%);
+    }
+    #btn-pause:disabled {
+        opacity: .45;
+        cursor: not-allowed;
+    }
+
+    /* 停止播放按鈕樣式 */
+    #btn-stop-playback {
+        background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+        color: #fff;
+        font-weight: 700;
+    }
+    #btn-stop-playback:hover:not(:disabled) {
+        background: linear-gradient(135deg, #e53935 0%, #c62828 100%);
+        transform: translateY(-1px);
+    }
+    #btn-stop-playback:active:not(:disabled) {
+        background: linear-gradient(135deg, #c62828 0%, #b71c1c 100%);
+    }
+    #btn-stop-playback:disabled {
+        opacity: .45;
+        cursor: not-allowed;
+    }
+
+    /* 取消選取區間按鈕樣式 */
+    #btn-clear-selection {
+        background: linear-gradient(135deg, #9e9e9e 0%, #757575 100%);
+        color: #fff;
+        font-weight: 700;
+    }
+    #btn-clear-selection:hover:not(:disabled) {
+        background: linear-gradient(135deg, #b0b0b0 0%, #616161 100%);
+        transform: translateY(-1px);
+    }
+    #btn-clear-selection:active:not(:disabled) {
+        background: linear-gradient(135deg, #616161 0%, #424242 100%);
+    }
+    #btn-clear-selection:disabled {
+        opacity: .35;
+        cursor: not-allowed;
     }
     
     .waveform-toolbar .hint {
@@ -385,7 +440,7 @@ html {
         box-shadow: 0 3px 8px rgba(102, 126, 234, 0.2);
     }
     
-    /* 選取播放控制 */
+    /* 已棄用選取播放控制容器（保留樣式若殘留 DOM 也不影響） */
     #selection-playback-controls {
         margin: 12px 8px;
         text-align: center;
@@ -1096,7 +1151,7 @@ html {
         cursor: not-allowed;
     }
     
-    /* AGC 控制區 - 桌機樣式 */    }
+    /* AGC 控制區 - 桌機樣式 */
     
     /* AGC 控制區 - 桌機樣式 */
     .agc-container {
@@ -1291,23 +1346,7 @@ html {
         cursor: not-allowed;
     }
     
-    /* 播放按鈕特殊樣式 - 桌機 */
-    #accum-play-selection {
-        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-        color: white;
-        font-weight: bold;
-        border-color: #4CAF50;
-    }
-    
-    #accum-play-selection:hover:not(:disabled) {
-        background: linear-gradient(135deg, #45a049 0%, #388e3c 100%);
-        border-color: #45a049;
-        box-shadow: 0 6px 12px rgba(76, 175, 80, 0.4);
-    }
-    
-    #accum-play-selection:active:not(:disabled) {
-        background: linear-gradient(135deg, #388e3c 0%, #2e7d32 100%);
-    }
+    /* 取消舊的 #accum-play-selection 桌機樣式（已改為主控制區播放鍵） */
     
     .waveform-toolbar .hint {
         flex: 1 1 100%;

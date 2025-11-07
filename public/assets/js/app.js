@@ -7,6 +7,10 @@
 var audio = document.querySelector('audio');                    // 主要音頻播放元素
 var audioBlobsContainer = document.querySelector('#audio-blobs-container'); // 錄音片段容器
 var downloadButton = document.getElementById('btn-download-recording');     // 下載按鈕
+var btnPlay = document.getElementById('btn-play');             // 播放
+var btnPause = document.getElementById('btn-pause');           // 暫停
+var btnStopPlayback = document.getElementById('btn-stop-playback'); // 停止播放
+var btnClearSelection = document.getElementById('btn-clear-selection'); // 取消選取
 
 // 錄音狀態控制變數
 var is_ready_to_record = true;   // 是否準備好錄音
@@ -36,7 +40,6 @@ var accumulatedControls = {
     zoomReset: document.getElementById('accum-zoom-reset'),
     panLeft: document.getElementById('accum-pan-left'),
     panRight: document.getElementById('accum-pan-right'),
-    playSelection: document.getElementById('accum-play-selection'),
     toolbar: document.getElementById('accumulated-toolbar')
 };
 
@@ -50,8 +53,7 @@ function setAccumulatedControlsEnabled(enabled) {
         accumulatedControls.zoomOut,
         accumulatedControls.zoomReset,
         accumulatedControls.panLeft,
-        accumulatedControls.panRight,
-        accumulatedControls.playSelection
+        accumulatedControls.panRight
     ];
 
     for (var i = 0; i < buttons.length; i++) {
@@ -66,6 +68,51 @@ function setAccumulatedControlsEnabled(enabled) {
 }
 
 setAccumulatedControlsEnabled(false);
+
+/**
+ * 更新播放控制按鈕的啟用/停用狀態
+ */
+function updatePlaybackButtonsState() {
+    if (!btnPlay || !btnPause || !btnStopPlayback) return;
+
+    // 錄音期間，全部停用
+    if (isCurrentlyRecording) {
+        btnPlay.disabled = true;
+        btnPause.disabled = true;
+        btnStopPlayback.disabled = true;
+        if (btnClearSelection) btnClearSelection.disabled = true;
+        return;
+    }
+
+    // 尚無錄音可播
+    if (!latestRecordingBlob) {
+        btnPlay.disabled = true;
+        btnPause.disabled = true;
+        btnStopPlayback.disabled = true;
+        if (btnClearSelection) btnClearSelection.disabled = (selectionStart === null || selectionEnd === null || selectionStart === selectionEnd);
+        return;
+    }
+
+    // 正在播放
+    if (selectionAudioSource && accumulatedWaveform && accumulatedWaveform.isPlaying) {
+        btnPlay.disabled = true;
+        btnPause.disabled = false;
+        btnStopPlayback.disabled = false;
+        if (btnClearSelection) btnClearSelection.disabled = (selectionStart === null || selectionEnd === null || selectionStart === selectionEnd);
+        return;
+    }
+
+    // 已暫停或可待播
+    btnPlay.disabled = false;
+    btnPause.disabled = true;
+    // 若有播放位置或選取，允許停止將位置重置；否則無動作意義
+    var canStop = !!(accumulatedWaveform && (accumulatedWaveform.playbackPosition > 0 || (selectionStart !== null && selectionEnd !== null)));
+    btnStopPlayback.disabled = !canStop;
+    if (btnClearSelection) btnClearSelection.disabled = (selectionStart === null || selectionEnd === null || selectionStart === selectionEnd);
+}
+
+// 初始化時更新一次按鈕狀態
+updatePlaybackButtonsState();
 
 /*=================================================================
  * 初始化 Web Audio API
@@ -1039,6 +1086,33 @@ OverviewWaveform.prototype.draw = function() {
     ctx.strokeStyle = '#1E88E5';
     ctx.lineWidth = 2;
     ctx.strokeRect(viewStartX, 0, viewWidth, height);
+
+    // 繪製紅色垂直播放位置（若有播放或已設定位置）
+    var playbackPos = this.accumulatedWaveform.playbackPosition;
+    if (typeof playbackPos === 'number' && playbackPos >= 0 && playbackPos <= sampleCount) {
+        var playbackX = (playbackPos / sampleCount) * width;
+        ctx.strokeStyle = '#FF0000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(playbackX + 0.5, 0);
+        ctx.lineTo(playbackX + 0.5, height);
+        ctx.stroke();
+        // 頂部三角形
+        ctx.fillStyle = '#FF0000';
+        ctx.beginPath();
+        ctx.moveTo(playbackX, 0);
+        ctx.lineTo(playbackX - 5, 9);
+        ctx.lineTo(playbackX + 5, 9);
+        ctx.closePath();
+        ctx.fill();
+        // 底部三角形
+        ctx.beginPath();
+        ctx.moveTo(playbackX, height);
+        ctx.lineTo(playbackX - 5, height - 9);
+        ctx.lineTo(playbackX + 5, height - 9);
+        ctx.closePath();
+        ctx.fill();
+    }
 };
 
 /*=================================================================
@@ -1214,7 +1288,7 @@ function playSelectedOrFullAudio() {
         }
         
         // 創建音訊源並播放
-        selectionAudioSource = audioContext.createBufferSource();
+    selectionAudioSource = audioContext.createBufferSource();
         selectionAudioSource.buffer = newBuffer;
         selectionAudioSource.connect(audioContext.destination);
         
@@ -1232,9 +1306,11 @@ function playSelectedOrFullAudio() {
                 accumulatedWaveform.setPlaybackPosition(endSample / decimationFactor);
             }
             console.log('播放完成');
+            updatePlaybackButtonsState();
         };
         
         selectionAudioSource.start(0);
+        updatePlaybackButtonsState();
         console.log('開始播放，時長: ' + duration.toFixed(2) + ' 秒');
         
     }).catch(function(error) {
@@ -1242,6 +1318,7 @@ function playSelectedOrFullAudio() {
         if (accumulatedWaveform) {
             accumulatedWaveform.stopPlayback();
         }
+        updatePlaybackButtonsState();
     });
 }
 
@@ -1550,19 +1627,14 @@ function bindAccumulatedWaveformInteractions(canvas) {
         clearLongPressTimer();
         canvas.style.boxShadow = '';
         
-        if (isSelecting || isResizingSelection) {
-            // 選取或拉伸完成，如果有選取區域則顯示播放選項
-            if (selectionStart !== null && selectionEnd !== null && selectionStart !== selectionEnd) {
-                showSelectionPlaybackUI();
-            }
-        }
+        // 選取或拉伸完成後，不再顯示舊的播放 UI，僅重繪
         
         isDragging = false;
         isSelecting = false;
         isResizingSelection = false;
         resizeEdge = null;
         
-        // 恢復預設游標
+    // 恢復預設游標
         canvas.style.cursor = 'grab';
         
         if (activePointerId !== null) {
@@ -1573,6 +1645,9 @@ function bindAccumulatedWaveformInteractions(canvas) {
             }
         }
         activePointerId = null;
+
+        // 選取狀態可能已變更，更新按鈕狀態
+        updatePlaybackButtonsState();
     }
 
     canvas.addEventListener('pointerup', endDrag);
@@ -1660,66 +1735,13 @@ function bindAccumulatedWaveformInteractions(canvas) {
     }
     
     // 播放按鈕
-    var playButton = accumulatedControls.playSelection;
-    if (playButton) {
-        playButton.addEventListener('click', function() {
-            playSelectedOrFullAudio();
-        });
-    }
+    // (舊) toolbar 播放按鈕已移除，播放改由主控制區按鈕
 }
 
 /**
  * 顯示選取區域播放界面
  */
-function showSelectionPlaybackUI() {
-    if (selectionStart === null || selectionEnd === null) {
-        return;
-    }
-    
-    var toolbar = accumulatedControls.toolbar;
-    if (!toolbar) {
-        return;
-    }
-    
-    // 移除舊的播放控制（如果存在）
-    var oldPlaybackControls = document.getElementById('selection-playback-controls');
-    if (oldPlaybackControls) {
-        oldPlaybackControls.remove();
-    }
-    
-    // 創建播放控制容器
-    var playbackControls = document.createElement('div');
-    playbackControls.id = 'selection-playback-controls';
-    playbackControls.style.cssText = 'display: inline-flex; align-items: center; gap: 8px; margin-left: 15px; padding-left: 15px; border-left: 2px solid #ccc;';
-    
-    // 計算選取時長
-    var selStart = Math.min(selectionStart, selectionEnd);
-    var selEnd = Math.max(selectionStart, selectionEnd);
-    var selectionDuration = calculateSelectionDuration(selStart, selEnd);
-    
-    // 時長顯示
-    var durationLabel = document.createElement('span');
-    durationLabel.style.cssText = 'font-size: 13px; color: #4CAF50; font-weight: bold;';
-    durationLabel.textContent = '選取: ' + selectionDuration;
-    
-    // 播放按鈕
-    var playButton = document.createElement('button');
-    playButton.textContent = '▶ 播放選取';
-    playButton.style.cssText = 'background-color: #4CAF50; color: white;';
-    playButton.onclick = playSelectedRegion;
-    
-    // 清除選取按鈕
-    var clearButton = document.createElement('button');
-    clearButton.textContent = '✕ 清除選取';
-    clearButton.style.cssText = 'background-color: #f44336; color: white;';
-    clearButton.onclick = clearSelection;
-    
-    playbackControls.appendChild(durationLabel);
-    playbackControls.appendChild(playButton);
-    playbackControls.appendChild(clearButton);
-    
-    toolbar.appendChild(playbackControls);
-}
+// (移除) showSelectionPlaybackUI: 選取播放控制改由主播放按鈕處理
 
 /**
  * 計算選取區域的時長
@@ -1740,106 +1762,12 @@ function calculateSelectionDuration(startSample, endSample) {
 /**
  * 播放選取的區域
  */
-function playSelectedRegion() {
-    if (!latestRecordingBlob || selectionStart === null || selectionEnd === null) {
-        alert('無法播放：請先完成錄音並選取區域');
-        return;
-    }
-    
-    // 確保 AudioContext 已初始化
-    if (!audioContext) {
-        initializeAudioContext();
-    }
-    
-    // 恢復 AudioContext（如果被暫停）
-    if (audioContext.state === 'suspended') {
-        audioContext.resume();
-    }
-    
-    // 停止之前的播放
-    if (selectionAudioSource) {
-        try {
-            selectionAudioSource.stop();
-        } catch (e) {
-            // ignore
-        }
-        selectionAudioSource = null;
-    }
-    
-    var selStart = Math.min(selectionStart, selectionEnd);
-    var selEnd = Math.max(selectionStart, selectionEnd);
-    
-    // 解碼完整音頻並播放選取部分
-    latestRecordingBlob.arrayBuffer().then(function(arrayBuffer) {
-        return audioContext.decodeAudioData(arrayBuffer);
-    }).then(function(audioBuffer) {
-        // 計算實際的時間位置
-        var totalSamples = accumulatedWaveform.sampleCount;
-        
-        // 轉換樣本索引到實際時間
-        var startTime = (selStart / totalSamples) * audioBuffer.duration;
-        var endTime = (selEnd / totalSamples) * audioBuffer.duration;
-        var duration = endTime - startTime;
-        
-        console.log('Selection info:', {
-            selStart: selStart,
-            selEnd: selEnd,
-            totalSamples: totalSamples,
-            startTime: startTime,
-            endTime: endTime,
-            duration: duration,
-            audioBufferDuration: audioBuffer.duration
-        });
-        
-        // 創建音頻源
-        selectionAudioSource = audioContext.createBufferSource();
-        selectionAudioSource.buffer = audioBuffer;
-        selectionAudioSource.connect(audioContext.destination);
-        
-        // 播放選取的片段
-        selectionAudioSource.start(0, startTime, duration);
-        
-        // 播放結束後清理
-        selectionAudioSource.onended = function() {
-            selectionAudioSource = null;
-        };
-        
-        console.log('Playing selection from', startTime.toFixed(2), 'to', endTime.toFixed(2), 'seconds');
-    }).catch(function(error) {
-        console.error('Failed to play selection:', error);
-        alert('播放失敗：' + error.message);
-    });
-}
+// (移除) playSelectedRegion: 改由 playSelectedOrFullAudio 整合處理
 
 /**
  * 清除選取區域
  */
-function clearSelection() {
-    // 停止播放
-    if (selectionAudioSource) {
-        try {
-            selectionAudioSource.stop();
-        } catch (e) {
-            // ignore
-        }
-        selectionAudioSource = null;
-    }
-    
-    // 清除選取
-    selectionStart = null;
-    selectionEnd = null;
-    
-    // 移除播放控制
-    var playbackControls = document.getElementById('selection-playback-controls');
-    if (playbackControls) {
-        playbackControls.remove();
-    }
-    
-    // 重繪波形
-    if (accumulatedWaveform) {
-        accumulatedWaveform.draw();
-    }
-}
+// (移除) clearSelection: 若需清除可直接設置 selectionStart/End = null 並 redraw
 
 /**
  * 綁定全局波形的互動控制
@@ -2180,6 +2108,9 @@ function stopRecordingCallback() {
         if (downloadButton) {
             downloadButton.disabled = false;
         }
+
+        // 有可播放錄音後，更新播放按鈕狀態
+        updatePlaybackButtonsState();
     });
 
     /*---------------------------------------------------------------
@@ -2335,6 +2266,82 @@ document.getElementById('btn-toggle-recording').onclick = function() {
     }
 };
 
+// 綁定主播放控制按鈕
+if (btnPlay) {
+    btnPlay.addEventListener('click', function() {
+        // 確保 AudioContext 可用
+        initializeAudioContext().then(function(){
+            if (audioContext.state === 'suspended') {
+                return audioContext.resume();
+            }
+        }).finally(function(){
+            playSelectedOrFullAudio();
+            updatePlaybackButtonsState();
+        });
+    });
+}
+
+function pausePlayback() {
+    if (selectionAudioSource) {
+        try { selectionAudioSource.onended = null; selectionAudioSource.stop(); } catch(e) {}
+        selectionAudioSource = null;
+    }
+    if (accumulatedWaveform) {
+        accumulatedWaveform.stopPlayback();
+        // 不重置播放位置，保留於暫停點
+    }
+    updatePlaybackButtonsState();
+}
+
+if (btnPause) {
+    btnPause.addEventListener('click', function(){
+        pausePlayback();
+    });
+}
+
+function stopPlaybackAll() {
+    if (selectionAudioSource) {
+        try { selectionAudioSource.onended = null; selectionAudioSource.stop(); } catch(e) {}
+        selectionAudioSource = null;
+    }
+    if (accumulatedWaveform) {
+        accumulatedWaveform.stopPlayback();
+        // 將播放位置重置至選取起點或開頭
+        if (selectionStart !== null && selectionEnd !== null) {
+            accumulatedWaveform.setPlaybackPosition(Math.min(selectionStart, selectionEnd));
+        } else {
+            accumulatedWaveform.setPlaybackPosition(0);
+        }
+    }
+    updatePlaybackButtonsState();
+}
+
+if (btnStopPlayback) {
+    btnStopPlayback.addEventListener('click', function(){
+        stopPlaybackAll();
+    });
+}
+
+// 新增：清除選取區間
+function clearSelection() {
+    // 若正在播放，使用暫停以保留播放位置
+    if (selectionAudioSource || (accumulatedWaveform && accumulatedWaveform.isPlaying)) {
+        pausePlayback();
+    }
+    selectionStart = null;
+    selectionEnd = null;
+    if (accumulatedWaveform) {
+        accumulatedWaveform.draw();
+    }
+    updatePlaybackButtonsState();
+}
+
+if (btnClearSelection) {
+    btnClearSelection.addEventListener('click', function(){
+        clearSelection();
+    });
+}
+
 /*=================================================================
  * 開始錄音函數
  * 處理開始錄音時的所有邏輯
@@ -2377,6 +2384,9 @@ function startRecording() {
         liveWaveform.stop();
         liveWaveform = null;
     }
+
+    // 錄音開始時停用播放控制
+    updatePlaybackButtonsState();
 
     /*---------------------------------------------------------------
      * 捕獲麥克風並開始錄音
@@ -2525,6 +2535,7 @@ function stopRecording() {
     // 更新按鈕樣式和文字
     toggleButton.classList.remove('recording');
     toggleButton.innerHTML = '● 開始錄音';
+    // 等待 stopRecordingCallback 生成 blob 後再啟用播放
 }
 
 if (downloadButton) {
