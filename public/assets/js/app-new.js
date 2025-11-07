@@ -173,10 +173,6 @@ function makeXMLHttpRequest(url, data, callback) {
     };
 
     request.upload.onload = function() {
-        callback('progress-about-to-end');
-    };
-
-    request.upload.onload = function() {
         callback('progress-ended');
     };
 

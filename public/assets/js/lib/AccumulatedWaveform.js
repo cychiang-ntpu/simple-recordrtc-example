@@ -113,7 +113,8 @@ export class AccumulatedWaveform {
             }
 
             if (blockMin > blockMax) {
-                blockMin = blockMax = 0;
+                blockMin = 0;
+                blockMax = 0;
             }
 
             this.sampleMin.push(blockMin);

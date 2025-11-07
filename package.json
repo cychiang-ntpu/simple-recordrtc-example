@@ -5,22 +5,11 @@
   "type": "module",
   "main": "public/assets/js/lib/index.js",
   "exports": {
-    ".": {
-      "import": "./public/assets/js/lib/index.js",
-      "require": "./public/assets/js/lib/index.cjs"
-    },
-    "./LiveWaveform": {
-      "import": "./public/assets/js/lib/LiveWaveform.js"
-    },
-    "./AccumulatedWaveform": {
-      "import": "./public/assets/js/lib/AccumulatedWaveform.js"
-    },
-    "./RecordingManager": {
-      "import": "./public/assets/js/lib/RecordingManager.js"
-    },
-    "./AudioProcessor": {
-      "import": "./public/assets/js/lib/AudioProcessor.js"
-    }
+    ".": "./public/assets/js/lib/index.js",
+    "./LiveWaveform": "./public/assets/js/lib/LiveWaveform.js",
+    "./AccumulatedWaveform": "./public/assets/js/lib/AccumulatedWaveform.js",
+    "./RecordingManager": "./public/assets/js/lib/RecordingManager.js",
+    "./AudioProcessor": "./public/assets/js/lib/AudioProcessor.js"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

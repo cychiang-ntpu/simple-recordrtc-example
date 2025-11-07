@@ -63,8 +63,8 @@ export function mergeLeftRightBuffers(config, callback) {
             
             for (let i = 1; i < fitCount - 1; i++) {
                 const tmp = i * springFactor;
-                const before = Number(Math.floor(tmp)).toFixed();
-                const after = Number(Math.ceil(tmp)).toFixed();
+                const before = Math.floor(tmp);
+                const after = Math.ceil(tmp);
                 const atPoint = tmp - before;
                 newData[i] = linearInterpolate(data[before], data[after], atPoint);
             }
@@ -192,19 +192,18 @@ export function mergeLeftRightBuffers(config, callback) {
         });
     }
 
-    // Check if Chrome browser
-    const isChrome = typeof window !== 'undefined' && window.navigator && 
-                     /chrome/i.test(window.navigator.userAgent) && 
-                     !/edge/i.test(window.navigator.userAgent);
+    // Check if Web Worker is supported for better performance
+    const supportsWebWorker = typeof Worker !== 'undefined' && typeof window !== 'undefined';
 
-    if (!isChrome) {
+    if (!supportsWebWorker) {
+        // Use main thread if Web Worker is not supported
         mergeAudioBuffers(config, function(data) {
             callback(data.buffer, data.view);
         });
         return;
     }
 
-    // Use Web Worker for Chrome
+    // Use Web Worker for better performance
     const webWorker = processInWebWorker(mergeAudioBuffers);
 
     webWorker.onmessage = function(event) {
