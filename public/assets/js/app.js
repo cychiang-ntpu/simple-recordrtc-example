@@ -486,7 +486,7 @@ AccumulatedWaveform.prototype.draw = function() {
             ctx.fillStyle = 'rgba(76, 175, 80, 0.2)';
             ctx.fillRect(selStartX, 0, selEndX - selStartX, height);
             
-            // 繪製選取邊界
+            // 繪製選取邊界線
             ctx.strokeStyle = '#4CAF50';
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -495,6 +495,56 @@ AccumulatedWaveform.prototype.draw = function() {
             ctx.moveTo(selEndX, 0);
             ctx.lineTo(selEndX, height);
             ctx.stroke();
+            
+            // 繪製可拖曳的圓形手柄（觸控友善）
+            var handleRadius = 12;
+            var handleY = height / 2;
+            
+            // 左側手柄
+            if (selStart >= startSample) {
+                ctx.fillStyle = '#4CAF50';
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(selStartX, handleY, handleRadius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                
+                // 左側手柄內部指示器
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(selStartX - 4, handleY - 5);
+                ctx.lineTo(selStartX - 4, handleY + 5);
+                ctx.moveTo(selStartX, handleY - 5);
+                ctx.lineTo(selStartX, handleY + 5);
+                ctx.moveTo(selStartX + 4, handleY - 5);
+                ctx.lineTo(selStartX + 4, handleY + 5);
+                ctx.stroke();
+            }
+            
+            // 右側手柄
+            if (selEnd <= endSample) {
+                ctx.fillStyle = '#4CAF50';
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(selEndX, handleY, handleRadius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                
+                // 右側手柄內部指示器
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(selEndX - 4, handleY - 5);
+                ctx.lineTo(selEndX - 4, handleY + 5);
+                ctx.moveTo(selEndX, handleY - 5);
+                ctx.lineTo(selEndX, handleY + 5);
+                ctx.moveTo(selEndX + 4, handleY - 5);
+                ctx.lineTo(selEndX + 4, handleY + 5);
+                ctx.stroke();
+            }
         }
     }
     
@@ -973,7 +1023,18 @@ function bindAccumulatedWaveformInteractions(canvas) {
     var lastX = 0;
     var selectionStartX = 0;
     var activePointerId = null;
-    var edgeThreshold = 10; // 邊緣檢測範圍（像素）
+    var longPressTimer = null;
+    var longPressDelay = 500; // 長按時間（毫秒）
+    var isLongPress = false;
+    var startX = 0;
+    var startY = 0;
+    var moveThreshold = 10; // 移動超過此距離視為拖曳而非長按
+    
+    // 檢測是否為觸控設備
+    var isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    
+    // 根據設備類型設置邊緣檢測範圍
+    var edgeThreshold = isTouchDevice ? 25 : 10; // 觸控設備用更大的範圍
 
     // 檢測滑鼠是否在選取區域邊緣
     function getSelectionEdgeAt(x, rect) {
@@ -1004,6 +1065,15 @@ function bindAccumulatedWaveformInteractions(canvas) {
         
         return null;
     }
+    
+    // 清除長按計時器
+    function clearLongPressTimer() {
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
+        isLongPress = false;
+    }
 
     // 更新游標樣式
     canvas.addEventListener('pointermove', function(event) {
@@ -1032,9 +1102,16 @@ function bindAccumulatedWaveformInteractions(canvas) {
         activePointerId = event.pointerId;
         var rect = canvas.getBoundingClientRect();
         var clickX = event.clientX - rect.left;
+        var clickY = event.clientY - rect.top;
         
-        // 檢查是否按下 Shift 鍵
+        // 記錄起始位置
+        startX = event.clientX;
+        startY = event.clientY;
+        
+        // 檢查是否按下 Shift 鍵或在邊緣（PC 操作）
         if (event.shiftKey) {
+            clearLongPressTimer();
+            
             // 檢查是否在選取區域邊緣
             var edge = getSelectionEdgeAt(clickX, rect);
             
@@ -1068,13 +1145,66 @@ function bindAccumulatedWaveformInteractions(canvas) {
                 canvas.style.cursor = 'crosshair';
             }
         } else {
-            // 一般拖曳平移模式
-            isDragging = true;
-            isSelecting = false;
-            isResizingSelection = false;
-            lastX = event.clientX;
-            accumulatedWaveform.isAutoScroll = false;
-            canvas.style.cursor = 'grabbing';
+            // 檢查是否直接點擊在選取區域邊緣（觸控設備優化）
+            var edge = getSelectionEdgeAt(clickX, rect);
+            
+            if (edge) {
+                // 直接開始拉伸（無需 Shift，方便觸控操作）
+                clearLongPressTimer();
+                isResizingSelection = true;
+                resizeEdge = edge;
+                isDragging = false;
+                isSelecting = false;
+                canvas.style.cursor = 'ew-resize';
+                
+                // 觸控回饋
+                if (navigator.vibrate) {
+                    navigator.vibrate(50);
+                }
+            } else {
+                // 開始長按檢測（用於觸控設備選取）
+                isLongPress = false;
+                longPressTimer = setTimeout(function() {
+                    // 長按觸發選取模式
+                    if (!isDragging && !isSelecting && !isResizingSelection) {
+                        isLongPress = true;
+                        isSelecting = true;
+                        isDragging = false;
+                        selectionStartX = clickX;
+                        
+                        // 計算選取起始樣本
+                        var visibleSamples = accumulatedWaveform.getVisibleSamples();
+                        var sampleRatio = clickX / rect.width;
+                        selectionStart = Math.floor(accumulatedWaveform.viewStart + sampleRatio * visibleSamples);
+                        selectionEnd = selectionStart;
+                        
+                        // 清除舊的播放控制
+                        var oldPlaybackControls = document.getElementById('selection-playback-controls');
+                        if (oldPlaybackControls) {
+                            oldPlaybackControls.remove();
+                        }
+                        
+                        accumulatedWaveform.draw();
+                        canvas.style.cursor = 'crosshair';
+                        
+                        // 震動回饋
+                        if (navigator.vibrate) {
+                            navigator.vibrate(100);
+                        }
+                        
+                        // 視覺提示
+                        canvas.style.boxShadow = '0 0 10px 2px rgba(76, 175, 80, 0.5)';
+                    }
+                }, longPressDelay);
+                
+                // 一般拖曳平移模式（如果不觸發長按）
+                isDragging = true;
+                isSelecting = false;
+                isResizingSelection = false;
+                lastX = event.clientX;
+                accumulatedWaveform.isAutoScroll = false;
+                canvas.style.cursor = 'grabbing';
+            }
         }
         
         try {
@@ -1095,6 +1225,18 @@ function bindAccumulatedWaveformInteractions(canvas) {
         
         var rect = canvas.getBoundingClientRect();
         var currentX = event.clientX - rect.left;
+        
+        // 檢測移動距離，超過閾值則取消長按
+        if (longPressTimer && !isLongPress) {
+            var moveDistance = Math.sqrt(
+                Math.pow(event.clientX - startX, 2) + 
+                Math.pow(event.clientY - startY, 2)
+            );
+            
+            if (moveDistance > moveThreshold) {
+                clearLongPressTimer();
+            }
+        }
         
         if (isResizingSelection) {
             // 拉伸選取區域邊緣
@@ -1131,8 +1273,8 @@ function bindAccumulatedWaveformInteractions(canvas) {
             
             accumulatedWaveform.draw();
             
-        } else if (isDragging) {
-            // 平移波形
+        } else if (isDragging && !isLongPress) {
+            // 平移波形（長按模式下不平移）
             var deltaX = event.clientX - lastX;
             if (deltaX !== 0) {
                 accumulatedWaveform.panByPixels(-deltaX);
@@ -1145,6 +1287,10 @@ function bindAccumulatedWaveformInteractions(canvas) {
         if (event && event.pointerId !== activePointerId) {
             return;
         }
+        
+        // 清除長按計時器和視覺效果
+        clearLongPressTimer();
+        canvas.style.boxShadow = '';
         
         if (isSelecting || isResizingSelection) {
             // 選取或拉伸完成，如果有選取區域則顯示播放選項
