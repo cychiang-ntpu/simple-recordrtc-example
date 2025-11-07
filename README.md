@@ -70,9 +70,14 @@ project/
 3. Access `public/index.html` for the original implementation
 
 ### Using the Modular Library
-1. Open `public/index-new.html` for a demo of the modular library
-2. See `public/assets/js/lib/README.md` for complete API documentation
-3. Import the library in your project:
+
+#### Quick Examples
+1. **Simple Example**: Open `public/example-simple.html` - minimal setup with essential features
+2. **Full Demo**: Open `public/index-new.html` - complete demo with all original features
+3. **API Documentation**: See `public/assets/js/lib/README.md` for complete API reference
+
+#### Basic Integration
+Import the library in your project:
 
 ```javascript
 import SimpleRecordRTC from './public/assets/js/lib/index.js';
