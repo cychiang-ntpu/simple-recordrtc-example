@@ -67,6 +67,18 @@ button {
     margin-top: 20px;
 }
 
+#accumulated-waveform {
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
+
+#accumulated-waveform:active {
+    cursor: grabbing;
+}
+
 #overview-waveform {
     cursor: pointer;
     border: 2px solid #1E88E5;
@@ -75,6 +87,19 @@ button {
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
+}
+
+#selection-playback-controls button {
+    font-size: 13px;
+    padding: 6px 12px;
+}
+
+#selection-playback-controls button:hover {
+    opacity: 0.9;
+}
+
+#selection-playback-controls button:active {
+    transform: scale(0.98);
 }
 
 .waveform-toolbar {

@@ -25,6 +25,11 @@ var overviewWaveform = null;      // 全局波形顯示器實例
 var latestRecordingBlob = null;   // 最近一次錄音的 Blob
 var latestRecordingUrl = null;    // 最近一次錄音的 Object URL
 var accumulatedControlsBound = false; // 是否已綁定累積波形互動
+
+// 區域選取相關變數
+var selectionStart = null;        // 選取起始樣本索引
+var selectionEnd = null;          // 選取結束樣本索引
+var selectionAudioSource = null;  // 用於播放選取區域的音頻源
 var accumulatedControls = {
     zoomIn: document.getElementById('accum-zoom-in'),
     zoomOut: document.getElementById('accum-zoom-out'),
@@ -463,6 +468,35 @@ AccumulatedWaveform.prototype.draw = function() {
     }
 
     ctx.stroke();
+    
+    // 繪製選取區域
+    if (selectionStart !== null && selectionEnd !== null) {
+        var selStart = Math.min(selectionStart, selectionEnd);
+        var selEnd = Math.max(selectionStart, selectionEnd);
+        
+        // 只繪製在可視範圍內的選取
+        if (selEnd >= startSample && selStart <= endSample) {
+            var visStart = Math.max(selStart, startSample);
+            var visEnd = Math.min(selEnd, endSample);
+            
+            var selStartX = ((visStart - startSample) / visibleSamples) * width;
+            var selEndX = ((visEnd - startSample) / visibleSamples) * width;
+            
+            // 繪製半透明選取區域
+            ctx.fillStyle = 'rgba(76, 175, 80, 0.2)';
+            ctx.fillRect(selStartX, 0, selEndX - selStartX, height);
+            
+            // 繪製選取邊界
+            ctx.strokeStyle = '#4CAF50';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(selStartX, 0);
+            ctx.lineTo(selStartX, height);
+            ctx.moveTo(selEndX, 0);
+            ctx.lineTo(selEndX, height);
+            ctx.stroke();
+        }
+    }
     
     // 同步更新全局波形視圖
     if (overviewWaveform) {
@@ -933,17 +967,116 @@ function bindAccumulatedWaveformInteractions(canvas) {
     accumulatedControlsBound = true;
 
     var isDragging = false;
+    var isSelecting = false;
+    var isResizingSelection = false;
+    var resizeEdge = null; // 'left' 或 'right'
     var lastX = 0;
+    var selectionStartX = 0;
     var activePointerId = null;
+    var edgeThreshold = 10; // 邊緣檢測範圍（像素）
+
+    // 檢測滑鼠是否在選取區域邊緣
+    function getSelectionEdgeAt(x, rect) {
+        if (selectionStart === null || selectionEnd === null) {
+            return null;
+        }
+        
+        var visibleSamples = accumulatedWaveform.getVisibleSamples();
+        var selStart = Math.min(selectionStart, selectionEnd);
+        var selEnd = Math.max(selectionStart, selectionEnd);
+        
+        // 轉換樣本位置到像素位置
+        var leftSamplePos = selStart - accumulatedWaveform.viewStart;
+        var rightSamplePos = selEnd - accumulatedWaveform.viewStart;
+        
+        var leftX = (leftSamplePos / visibleSamples) * rect.width;
+        var rightX = (rightSamplePos / visibleSamples) * rect.width;
+        
+        // 檢查是否接近左邊緣
+        if (Math.abs(x - leftX) <= edgeThreshold) {
+            return 'left';
+        }
+        
+        // 檢查是否接近右邊緣
+        if (Math.abs(x - rightX) <= edgeThreshold) {
+            return 'right';
+        }
+        
+        return null;
+    }
+
+    // 更新游標樣式
+    canvas.addEventListener('pointermove', function(event) {
+        if (!accumulatedWaveform || isDragging || isSelecting || isResizingSelection) {
+            return;
+        }
+        
+        var rect = canvas.getBoundingClientRect();
+        var x = event.clientX - rect.left;
+        var edge = getSelectionEdgeAt(x, rect);
+        
+        if (event.shiftKey && edge) {
+            canvas.style.cursor = 'ew-resize';
+        } else if (event.shiftKey) {
+            canvas.style.cursor = 'crosshair';
+        } else {
+            canvas.style.cursor = 'grab';
+        }
+    });
 
     canvas.addEventListener('pointerdown', function(event) {
         if (!accumulatedWaveform) {
             return;
         }
-        isDragging = true;
+        
         activePointerId = event.pointerId;
-        lastX = event.clientX;
-        accumulatedWaveform.isAutoScroll = false;
+        var rect = canvas.getBoundingClientRect();
+        var clickX = event.clientX - rect.left;
+        
+        // 檢查是否按下 Shift 鍵
+        if (event.shiftKey) {
+            // 檢查是否在選取區域邊緣
+            var edge = getSelectionEdgeAt(clickX, rect);
+            
+            if (edge) {
+                // 拉伸選取區域邊緣
+                isResizingSelection = true;
+                resizeEdge = edge;
+                isDragging = false;
+                isSelecting = false;
+                canvas.style.cursor = 'ew-resize';
+            } else {
+                // 創建新的選取區域
+                isSelecting = true;
+                isDragging = false;
+                isResizingSelection = false;
+                selectionStartX = clickX;
+                
+                // 計算選取起始樣本
+                var visibleSamples = accumulatedWaveform.getVisibleSamples();
+                var sampleRatio = clickX / rect.width;
+                selectionStart = Math.floor(accumulatedWaveform.viewStart + sampleRatio * visibleSamples);
+                selectionEnd = selectionStart;
+                
+                // 清除舊的播放控制
+                var oldPlaybackControls = document.getElementById('selection-playback-controls');
+                if (oldPlaybackControls) {
+                    oldPlaybackControls.remove();
+                }
+                
+                accumulatedWaveform.draw();
+                canvas.style.cursor = 'crosshair';
+            }
+        } else {
+            // 一般拖曳平移模式
+            isDragging = true;
+            isSelecting = false;
+            isResizingSelection = false;
+            lastX = event.clientX;
+            accumulatedWaveform.isAutoScroll = false;
+            canvas.style.cursor = 'grabbing';
+        }
+        
         try {
             canvas.setPointerCapture(activePointerId);
         } catch (err) {
@@ -952,14 +1085,59 @@ function bindAccumulatedWaveformInteractions(canvas) {
     });
 
     canvas.addEventListener('pointermove', function(event) {
-        if (!isDragging || !accumulatedWaveform || event.pointerId !== activePointerId) {
+        if (!accumulatedWaveform) {
             return;
         }
-
-        var deltaX = event.clientX - lastX;
-        if (deltaX !== 0) {
-            accumulatedWaveform.panByPixels(-deltaX);
-            lastX = event.clientX;
+        
+        if (event.pointerId !== activePointerId && (isDragging || isSelecting || isResizingSelection)) {
+            return;
+        }
+        
+        var rect = canvas.getBoundingClientRect();
+        var currentX = event.clientX - rect.left;
+        
+        if (isResizingSelection) {
+            // 拉伸選取區域邊緣
+            var visibleSamples = accumulatedWaveform.getVisibleSamples();
+            var sampleRatio = currentX / rect.width;
+            var newSample = Math.floor(accumulatedWaveform.viewStart + sampleRatio * visibleSamples);
+            
+            // 限制在有效範圍內
+            if (newSample < 0) newSample = 0;
+            if (newSample >= accumulatedWaveform.sampleCount) {
+                newSample = accumulatedWaveform.sampleCount - 1;
+            }
+            
+            // 更新對應的邊緣
+            if (resizeEdge === 'left') {
+                selectionStart = newSample;
+            } else if (resizeEdge === 'right') {
+                selectionEnd = newSample;
+            }
+            
+            accumulatedWaveform.draw();
+            
+        } else if (isSelecting) {
+            // 更新選取範圍
+            var visibleSamples = accumulatedWaveform.getVisibleSamples();
+            var sampleRatio = currentX / rect.width;
+            selectionEnd = Math.floor(accumulatedWaveform.viewStart + sampleRatio * visibleSamples);
+            
+            // 限制在有效範圍內
+            if (selectionEnd < 0) selectionEnd = 0;
+            if (selectionEnd >= accumulatedWaveform.sampleCount) {
+                selectionEnd = accumulatedWaveform.sampleCount - 1;
+            }
+            
+            accumulatedWaveform.draw();
+            
+        } else if (isDragging) {
+            // 平移波形
+            var deltaX = event.clientX - lastX;
+            if (deltaX !== 0) {
+                accumulatedWaveform.panByPixels(-deltaX);
+                lastX = event.clientX;
+            }
         }
     });
 
@@ -967,7 +1145,22 @@ function bindAccumulatedWaveformInteractions(canvas) {
         if (event && event.pointerId !== activePointerId) {
             return;
         }
+        
+        if (isSelecting || isResizingSelection) {
+            // 選取或拉伸完成，如果有選取區域則顯示播放選項
+            if (selectionStart !== null && selectionEnd !== null && selectionStart !== selectionEnd) {
+                showSelectionPlaybackUI();
+            }
+        }
+        
         isDragging = false;
+        isSelecting = false;
+        isResizingSelection = false;
+        resizeEdge = null;
+        
+        // 恢復預設游標
+        canvas.style.cursor = 'grab';
+        
         if (activePointerId !== null) {
             try {
                 canvas.releasePointerCapture(activePointerId);
@@ -1060,6 +1253,179 @@ function bindAccumulatedWaveformInteractions(canvas) {
             var step = Math.round(accumulatedWaveform.getVisibleSamples() * 0.25);
             accumulatedWaveform.panBySamples(step);
         });
+    }
+}
+
+/**
+ * 顯示選取區域播放界面
+ */
+function showSelectionPlaybackUI() {
+    if (selectionStart === null || selectionEnd === null) {
+        return;
+    }
+    
+    var toolbar = accumulatedControls.toolbar;
+    if (!toolbar) {
+        return;
+    }
+    
+    // 移除舊的播放控制（如果存在）
+    var oldPlaybackControls = document.getElementById('selection-playback-controls');
+    if (oldPlaybackControls) {
+        oldPlaybackControls.remove();
+    }
+    
+    // 創建播放控制容器
+    var playbackControls = document.createElement('div');
+    playbackControls.id = 'selection-playback-controls';
+    playbackControls.style.cssText = 'display: inline-flex; align-items: center; gap: 8px; margin-left: 15px; padding-left: 15px; border-left: 2px solid #ccc;';
+    
+    // 計算選取時長
+    var selStart = Math.min(selectionStart, selectionEnd);
+    var selEnd = Math.max(selectionStart, selectionEnd);
+    var selectionDuration = calculateSelectionDuration(selStart, selEnd);
+    
+    // 時長顯示
+    var durationLabel = document.createElement('span');
+    durationLabel.style.cssText = 'font-size: 13px; color: #4CAF50; font-weight: bold;';
+    durationLabel.textContent = '選取: ' + selectionDuration;
+    
+    // 播放按鈕
+    var playButton = document.createElement('button');
+    playButton.textContent = '▶ 播放選取';
+    playButton.style.cssText = 'background-color: #4CAF50; color: white;';
+    playButton.onclick = playSelectedRegion;
+    
+    // 清除選取按鈕
+    var clearButton = document.createElement('button');
+    clearButton.textContent = '✕ 清除選取';
+    clearButton.style.cssText = 'background-color: #f44336; color: white;';
+    clearButton.onclick = clearSelection;
+    
+    playbackControls.appendChild(durationLabel);
+    playbackControls.appendChild(playButton);
+    playbackControls.appendChild(clearButton);
+    
+    toolbar.appendChild(playbackControls);
+}
+
+/**
+ * 計算選取區域的時長
+ */
+function calculateSelectionDuration(startSample, endSample) {
+    if (!accumulatedWaveform) {
+        return '0:00';
+    }
+    
+    var sampleCount = Math.abs(endSample - startSample);
+    var sampleRate = accumulatedWaveform.sourceSampleRate;
+    var effectiveSampleRate = sampleRate / accumulatedWaveform.decimationFactor;
+    var durationSeconds = sampleCount / effectiveSampleRate;
+    
+    return calculateTimeDuration(durationSeconds);
+}
+
+/**
+ * 播放選取的區域
+ */
+function playSelectedRegion() {
+    if (!latestRecordingBlob || selectionStart === null || selectionEnd === null) {
+        alert('無法播放：請先完成錄音並選取區域');
+        return;
+    }
+    
+    // 確保 AudioContext 已初始化
+    if (!audioContext) {
+        initializeAudioContext();
+    }
+    
+    // 恢復 AudioContext（如果被暫停）
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+    
+    // 停止之前的播放
+    if (selectionAudioSource) {
+        try {
+            selectionAudioSource.stop();
+        } catch (e) {
+            // ignore
+        }
+        selectionAudioSource = null;
+    }
+    
+    var selStart = Math.min(selectionStart, selectionEnd);
+    var selEnd = Math.max(selectionStart, selectionEnd);
+    
+    // 解碼完整音頻並播放選取部分
+    latestRecordingBlob.arrayBuffer().then(function(arrayBuffer) {
+        return audioContext.decodeAudioData(arrayBuffer);
+    }).then(function(audioBuffer) {
+        // 計算實際的時間位置
+        var totalSamples = accumulatedWaveform.sampleCount;
+        
+        // 轉換樣本索引到實際時間
+        var startTime = (selStart / totalSamples) * audioBuffer.duration;
+        var endTime = (selEnd / totalSamples) * audioBuffer.duration;
+        var duration = endTime - startTime;
+        
+        console.log('Selection info:', {
+            selStart: selStart,
+            selEnd: selEnd,
+            totalSamples: totalSamples,
+            startTime: startTime,
+            endTime: endTime,
+            duration: duration,
+            audioBufferDuration: audioBuffer.duration
+        });
+        
+        // 創建音頻源
+        selectionAudioSource = audioContext.createBufferSource();
+        selectionAudioSource.buffer = audioBuffer;
+        selectionAudioSource.connect(audioContext.destination);
+        
+        // 播放選取的片段
+        selectionAudioSource.start(0, startTime, duration);
+        
+        // 播放結束後清理
+        selectionAudioSource.onended = function() {
+            selectionAudioSource = null;
+        };
+        
+        console.log('Playing selection from', startTime.toFixed(2), 'to', endTime.toFixed(2), 'seconds');
+    }).catch(function(error) {
+        console.error('Failed to play selection:', error);
+        alert('播放失敗：' + error.message);
+    });
+}
+
+/**
+ * 清除選取區域
+ */
+function clearSelection() {
+    // 停止播放
+    if (selectionAudioSource) {
+        try {
+            selectionAudioSource.stop();
+        } catch (e) {
+            // ignore
+        }
+        selectionAudioSource = null;
+    }
+    
+    // 清除選取
+    selectionStart = null;
+    selectionEnd = null;
+    
+    // 移除播放控制
+    var playbackControls = document.getElementById('selection-playback-controls');
+    if (playbackControls) {
+        playbackControls.remove();
+    }
+    
+    // 重繪波形
+    if (accumulatedWaveform) {
+        accumulatedWaveform.draw();
     }
 }
 
