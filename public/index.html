@@ -21,24 +21,30 @@
 <!-- 預留的標題區域 -->
 <h4>what?</h4>
 
+<!-- AGC 控制區域 -->
+<div class="agc-container">
+    <label class="agc-label">
+        <input type="checkbox" id="agc-toggle" checked>
+        <span>啟用自動增益控制 (AGC)</span>
+    </label>
+    <small class="agc-hint">關閉可減少錄音啟動延遲，但音量可能較小且不穩定</small>
+</div>
+
 <!-- 錄音控制按鈕區域 -->
 <div class="button-container">
-    <button id="btn-start-recording">開始錄音</button>
-    <button id="btn-stop-recording" disabled>結束錄音</button>
+    <button id="btn-toggle-recording" class="recording-toggle">● 開始錄音</button>
+    <button id="accum-play-selection" class="play-button">▶ 播放</button>
     <button id="btn-download-recording" disabled>下載錄音</button>
 </div>
 
 <!-- 即時波形顯示 -->
 <canvas id="waveform" width="750" height="200"></canvas>
 
-<!-- 全局波形顯示 (縮覽圖) -->
-<div style="text-align: center; margin-top: 20px;">
-    <label style="font-weight: bold; margin-bottom: 5px; display: block;">全局波形視圖</label>
-    <canvas id="overview-waveform" width="750" height="80"></canvas>
-</div>
-
 <!-- 累積波形顯示 -->
 <canvas id="accumulated-waveform" width="750" height="140"></canvas>
+
+<!-- 全局波形顯示 (縮覽圖) -->
+<canvas id="overview-waveform" width="750" height="80"></canvas>
 
 <div id="accumulated-toolbar" class="waveform-toolbar">
     <button type="button" id="accum-pan-left">&larr; 向左</button>

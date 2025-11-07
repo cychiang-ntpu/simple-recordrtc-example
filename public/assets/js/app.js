@@ -36,6 +36,7 @@ var accumulatedControls = {
     zoomReset: document.getElementById('accum-zoom-reset'),
     panLeft: document.getElementById('accum-pan-left'),
     panRight: document.getElementById('accum-pan-right'),
+    playSelection: document.getElementById('accum-play-selection'),
     toolbar: document.getElementById('accumulated-toolbar')
 };
 
@@ -49,7 +50,8 @@ function setAccumulatedControlsEnabled(enabled) {
         accumulatedControls.zoomOut,
         accumulatedControls.zoomReset,
         accumulatedControls.panLeft,
-        accumulatedControls.panRight
+        accumulatedControls.panRight,
+        accumulatedControls.playSelection
     ];
 
     for (var i = 0; i < buttons.length; i++) {
@@ -73,6 +75,7 @@ setAccumulatedControlsEnabled(false);
 /**
  * 初始化 Web Audio API 組件
  * 確保 AudioContext 在用戶互動後被創建
+ * @returns {Promise} 返回 Promise，確保 AudioContext 完全就緒
  */
 function initializeAudioContext() {
     if (!audioContext) {
@@ -90,10 +93,15 @@ function initializeAudioContext() {
         analyserSilencer.connect(audioContext.destination);
     }
     
-    // 如果 AudioContext 處於暫停狀態，嘗試恢復
+    // 如果 AudioContext 處於暫停狀態，嘗試恢復並返回 Promise
     if (audioContext.state === 'suspended') {
-        audioContext.resume();
+        return audioContext.resume().catch(function(err) {
+            console.warn('Unable to resume AudioContext:', err);
+        });
     }
+    
+    // AudioContext 已經是 running 狀態，返回已解決的 Promise
+    return Promise.resolve();
 }
 
 /*=================================================================
@@ -118,14 +126,12 @@ function LiveWaveform(canvas, analyserNode) {
     this.width = canvas.width;
     this.height = canvas.height;
 
-    if (this.analyser) {
-        this.analyser.fftSize = 1024;                // 控制 FFT 大小以平衡效能
-        this.bufferLength = this.analyser.fftSize;
-        this.dataArray = new Uint8Array(this.bufferLength);
-    } else {
-        this.bufferLength = 0;
-        this.dataArray = null;
-    }
+    // 延遲設定 FFT 參數，等到 start() 被調用時再設定
+    this.bufferLength = 0;
+    this.dataArray = null;
+    
+    // 振幅放大倍率（用於顯示微弱訊號）
+    this.amplification = 3.0;
 }
 
 /**
@@ -135,27 +141,40 @@ function LiveWaveform(canvas, analyserNode) {
  */
 LiveWaveform.prototype.start = function(stream) {
     if (this.isRunning || !audioContext || !this.analyser) {
-        return; // 缺少必要元件時不處理
+        return;
     }
 
     this.isRunning = true;
+    
+    var self = this;
 
+    // 確保 AudioContext 處於運行狀態
+    var contextReady = Promise.resolve();
     if (audioContext.state === 'suspended') {
-        audioContext.resume().catch(function(err) {
+        contextReady = audioContext.resume().catch(function(err) {
             console.warn('Unable to resume AudioContext:', err);
         });
     }
 
-    // 為避免重複連線先清除舊的 source
-    if (this.mediaStreamSource) {
-        this.mediaStreamSource.disconnect();
-    }
+    // 等待 AudioContext 就緒後再連接麥克風
+    contextReady.then(function() {
+        // 為避免重複連線先清除舊的 source
+        if (self.mediaStreamSource) {
+            self.mediaStreamSource.disconnect();
+        }
 
-    this.mediaStreamSource = audioContext.createMediaStreamSource(stream);
-    this.mediaStreamSource.connect(this.analyser);
+        // 連接麥克風到 analyser
+        self.mediaStreamSource = audioContext.createMediaStreamSource(stream);
+        self.mediaStreamSource.connect(self.analyser);
 
-    // 開始繪製循環
-    this.draw();
+        // 設定 FFT 參數（在連接之後）
+        self.analyser.fftSize = 1024;
+        self.bufferLength = self.analyser.fftSize;
+        self.dataArray = new Uint8Array(self.bufferLength);
+
+        // 立即開始繪製，不需要延遲
+        self.draw();
+    });
 };
 
 /**
@@ -216,6 +235,11 @@ LiveWaveform.prototype.draw = function() {
 
     for (var i = 0; i < this.bufferLength; i++) {
         var normalized = (this.dataArray[i] - 128) / 128.0; // 將數值轉為 -1 到 1
+        
+        // 應用振幅放大
+        normalized = normalized * this.amplification;
+        
+        // 限制範圍在 -1 到 1
         if (normalized > 1) {
             normalized = 1;
         } else if (normalized < -1) {
@@ -960,11 +984,15 @@ function calculateTimeDuration(secs) {
  * @param {function} callback - 成功獲取麥克風後的回調函數
  */
 function captureMicrophone(callback) {
+    // 讀取 AGC 設定
+    var agcToggle = document.getElementById('agc-toggle');
+    var agcEnabled = agcToggle ? agcToggle.checked : false;
+    
     navigator.mediaDevices.getUserMedia({
         audio: {
             echoCancellation: false,    // 關閉回音消除
             noiseSuppression: false,    // 關閉噪音抑制
-            autoGainControl: false      // 關閉自動增益控制
+            autoGainControl: agcEnabled // 根據使用者設定啟用/停用 AGC
         },
         video: false                    // 不需要視頻
     }).then(function(microphone) {
@@ -1002,6 +1030,86 @@ function appendBlobToAccumulatedWaveform(blob) {
         accumulatedWaveform.append(channelData);
     }).catch(function(error) {
         console.warn('Unable to decode audio chunk for accumulated waveform.', error);
+    });
+}
+
+/**
+ * 播放選取的音訊範圍或整句
+ */
+function playSelectedOrFullAudio() {
+    if (!latestRecordingBlob || !audioContext) {
+        console.warn('沒有可播放的音訊');
+        return;
+    }
+
+    // 停止之前的播放
+    if (selectionAudioSource) {
+        try {
+            selectionAudioSource.stop();
+        } catch (e) {
+            // 忽略已經停止的錯誤
+        }
+        selectionAudioSource = null;
+    }
+
+    latestRecordingBlob.arrayBuffer().then(function(arrayBuffer) {
+        return audioContext.decodeAudioData(arrayBuffer);
+    }).then(function(audioBuffer) {
+        var sampleRate = audioBuffer.sampleRate;
+        var channelData = audioBuffer.getChannelData(0);
+        
+        // 判斷是播放選取範圍還是整句
+        var hasSelection = (selectionStart !== null && selectionEnd !== null);
+        var startSample, endSample;
+        
+        if (hasSelection) {
+            // 計算選取範圍對應的實際樣本索引
+            var decimationFactor = accumulatedWaveform.decimationFactor;
+            startSample = Math.min(selectionStart, selectionEnd) * decimationFactor;
+            endSample = Math.max(selectionStart, selectionEnd) * decimationFactor;
+            
+            // 確保範圍有效
+            startSample = Math.max(0, Math.floor(startSample));
+            endSample = Math.min(channelData.length, Math.ceil(endSample));
+            
+            console.log('播放選取範圍: 樣本 ' + startSample + ' 到 ' + endSample);
+        } else {
+            // 播放整句
+            startSample = 0;
+            endSample = channelData.length;
+            console.log('播放整句: 總共 ' + channelData.length + ' 個樣本');
+        }
+        
+        if (startSample >= endSample) {
+            console.warn('選取範圍無效');
+            return;
+        }
+        
+        // 提取選取範圍的音訊數據
+        var duration = (endSample - startSample) / sampleRate;
+        var newBuffer = audioContext.createBuffer(1, endSample - startSample, sampleRate);
+        var newChannelData = newBuffer.getChannelData(0);
+        
+        for (var i = 0; i < newChannelData.length; i++) {
+            newChannelData[i] = channelData[startSample + i];
+        }
+        
+        // 創建音訊源並播放
+        selectionAudioSource = audioContext.createBufferSource();
+        selectionAudioSource.buffer = newBuffer;
+        selectionAudioSource.connect(audioContext.destination);
+        
+        // 播放結束後清理
+        selectionAudioSource.onended = function() {
+            selectionAudioSource = null;
+            console.log('播放完成');
+        };
+        
+        selectionAudioSource.start(0);
+        console.log('開始播放，時長: ' + duration.toFixed(2) + ' 秒');
+        
+    }).catch(function(error) {
+        console.error('播放失敗:', error);
     });
 }
 
@@ -1398,6 +1506,14 @@ function bindAccumulatedWaveformInteractions(canvas) {
             }
             var step = Math.round(accumulatedWaveform.getVisibleSamples() * 0.25);
             accumulatedWaveform.panBySamples(step);
+        });
+    }
+    
+    // 播放按鈕
+    var playButton = accumulatedControls.playSelection;
+    if (playButton) {
+        playButton.addEventListener('click', function() {
+            playSelectedOrFullAudio();
         });
     }
 }
@@ -2052,21 +2168,43 @@ function stopRecordingCallback() {
  * 用於在不同函數間共享錄音器實例
  *================================================================*/
 var recorder; // 全域可訪問的錄音器物件
+var isCurrentlyRecording = false; // 追蹤當前錄音狀態
 
 /*=================================================================
- * 開始錄音按鈕事件處理
- * 處理使用者點擊開始錄音時的所有邏輯
+ * 錄音切換按鈕事件處理
+ * 處理使用者點擊錄音切換按鈕時的所有邏輯（開始/停止錄音）
  *================================================================*/
 
-document.getElementById('btn-start-recording').onclick = function() {
+document.getElementById('btn-toggle-recording').onclick = function() {
+    if (!isCurrentlyRecording) {
+        // 開始錄音
+        startRecording.call(this);
+    } else {
+        // 停止錄音
+        stopRecording.call(this);
+    }
+};
+
+/*=================================================================
+ * 開始錄音函數
+ * 處理開始錄音時的所有邏輯
+ *================================================================*/
+
+function startRecording() {
+    var toggleButton = document.getElementById('btn-toggle-recording');
+    
     /*---------------------------------------------------------------
      * 初始化錄音狀態
      * 設定各種狀態變數並清理之前的錄音
      *--------------------------------------------------------------*/
-    this.disabled = true;           // 禁用開始錄音按鈕
+    isCurrentlyRecording = true;    // 設定為錄音中
     is_ready_to_record = false;     // 設定為非準備狀態
     is_recording = true;            // 設定為錄音中
     is_recorded = false;            // 設定為未完成錄音
+    
+    // 更新按鈕樣式和文字
+    toggleButton.classList.add('recording');
+    toggleButton.innerHTML = '■ 停止錄音';
 
     // 清空之前的錄音片段容器
     let element = audioBlobsContainer;
@@ -2095,130 +2233,138 @@ document.getElementById('btn-start-recording').onclick = function() {
      * 獲取用戶麥克風權限並初始化 RecordRTC
      *--------------------------------------------------------------*/
     captureMicrophone(function(microphone) {
-        // 初始化 Web Audio API
-        initializeAudioContext();
-        
-        // 將麥克風音頻流設定到主音頻元素
-        audio.srcObject = microphone;
+        // 初始化 Web Audio API 並等待就緒
+        initializeAudioContext().then(function() {
+            // 將麥克風音頻流設定到主音頻元素
+            audio.srcObject = microphone;
 
-        /*-----------------------------------------------------------
-         * 初始化即時波形顯示
-         * 創建 LiveWaveform 實例並連接到麥克風流
-         *----------------------------------------------------------*/
-        var liveCanvas = document.getElementById('waveform');
-        liveWaveform = liveCanvas ? new LiveWaveform(liveCanvas, analyser) : null;
-        if (liveWaveform) {
-            liveWaveform.start(microphone);
-        }
+            /*-----------------------------------------------------------
+             * 初始化即時波形顯示
+             * 創建 LiveWaveform 實例並連接到麥克風流
+             *----------------------------------------------------------*/
+            var liveCanvas = document.getElementById('waveform');
+            liveWaveform = liveCanvas ? new LiveWaveform(liveCanvas, analyser) : null;
+            if (liveWaveform) {
+                liveWaveform.start(microphone);
+            }
 
-        /*-----------------------------------------------------------
-         * 初始化累積波形顯示
-         * 顯示目前為止已錄製的所有音訊波形
-         *----------------------------------------------------------*/
-        var accumulatedCanvas = document.getElementById('accumulated-waveform');
-        accumulatedWaveform = accumulatedCanvas ? new AccumulatedWaveform(accumulatedCanvas) : null;
-        if (accumulatedCanvas) {
-            bindAccumulatedWaveformInteractions(accumulatedCanvas);
-        }
-        
-        /*-----------------------------------------------------------
-         * 初始化全局波形視圖
-         * 顯示整體波形並標示當前觀察區域
-         *----------------------------------------------------------*/
-        var overviewCanvas = document.getElementById('overview-waveform');
-        overviewWaveform = overviewCanvas && accumulatedWaveform ? new OverviewWaveform(overviewCanvas, accumulatedWaveform) : null;
-        if (overviewCanvas) {
-            bindOverviewWaveformInteractions(overviewCanvas);
-        }
-
-        /*-----------------------------------------------------------
-         * 初始化 RecordRTC 錄音器
-         * 設定錄音參數和即時處理回調
-         *----------------------------------------------------------*/
-        recorder = RecordRTC(microphone, {
-            type: 'audio',                    // 錄音類型：音頻
-            mimeType: 'audio/wav',            // 輸出格式：WAV
-            recorderType: StereoAudioRecorder, // 使用立體聲錄音器
-            numberOfAudioChannels: 1,         // 聲道數：單聲道
-            //sampleRate: 48000,             // 採樣率（註解掉使用預設值）
-            //desiredSampRate: 48000,        // 目標採樣率（註解掉使用預設值）
-            bufferSize: 2048,                // 緩衝區大小
-            timeSlice: 20,                   // 時間片段：每20ms觸發一次 ondataavailable，提高更新率
+            /*-----------------------------------------------------------
+             * 初始化累積波形顯示
+             * 顯示目前為止已錄製的所有音訊波形
+             *----------------------------------------------------------*/
+            var accumulatedCanvas = document.getElementById('accumulated-waveform');
+            accumulatedWaveform = accumulatedCanvas ? new AccumulatedWaveform(accumulatedCanvas) : null;
+            if (accumulatedCanvas) {
+                bindAccumulatedWaveformInteractions(accumulatedCanvas);
+            }
             
-            /*-------------------------------------------------------
-             * 即時音頻數據處理回調
-             * 每1000ms會觸發一次，接收錄音片段
-             *------------------------------------------------------*/
-            ondataavailable: function(blob) {
-                /*---------------------------------------------------
-                 * 創建錄音片段顯示容器
-                 * 為每個錄音片段創建獨立的顯示區域和波形
-                 *--------------------------------------------------*/
-                
-                // 創建音頻片段的主容器
-                var audioContainer = document.createElement('div');
-                audioContainer.style.cssText = 'margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9;';
-                
-                // 創建音頻播放控制器
-                var au = document.createElement('audio');
-                au.controls = true;                        // 顯示播放控制
-                au.srcObject = null;                       // 清空媒體流
-                au.src = URL.createObjectURL(blob);        // 設定音頻來源
-                
-                // 組織容器結構
-                audioContainer.appendChild(au);            // 添加音頻控制器
-                audioBlobsContainer.appendChild(audioContainer); // 添加到主容器
-                audioBlobsContainer.appendChild(document.createElement('hr')); // 添加分隔線
-
-                // 更新累積波形顯示
-                appendBlobToAccumulatedWaveform(blob);
+            /*-----------------------------------------------------------
+             * 初始化全局波形視圖
+             * 顯示整體波形並標示當前觀察區域
+             *----------------------------------------------------------*/
+            var overviewCanvas = document.getElementById('overview-waveform');
+            overviewWaveform = overviewCanvas && accumulatedWaveform ? new OverviewWaveform(overviewCanvas, accumulatedWaveform) : null;
+            if (overviewCanvas) {
+                bindOverviewWaveformInteractions(overviewCanvas);
             }
+
+            /*-----------------------------------------------------------
+             * 初始化 RecordRTC 錄音器
+             * 設定錄音參數和即時處理回調
+             *----------------------------------------------------------*/
+            recorder = RecordRTC(microphone, {
+                type: 'audio',                    // 錄音類型：音頻
+                mimeType: 'audio/wav',            // 輸出格式：WAV
+                recorderType: StereoAudioRecorder, // 使用立體聲錄音器
+                numberOfAudioChannels: 1,         // 聲道數：單聲道
+                //sampleRate: 48000,             // 採樣率（註解掉使用預設值）
+                //desiredSampRate: 48000,        // 目標採樣率（註解掉使用預設值）
+                bufferSize: 2048,                // 緩衝區大小
+                timeSlice: 20,                   // 時間片段：每20ms觸發一次 ondataavailable，提高更新率
+                
+                /*-------------------------------------------------------
+                 * 即時音頻數據處理回調
+                 * 每1000ms會觸發一次，接收錄音片段
+                 *------------------------------------------------------*/
+                ondataavailable: function(blob) {
+                    /*---------------------------------------------------
+                     * 創建錄音片段顯示容器
+                     * 為每個錄音片段創建獨立的顯示區域和波形
+                     *--------------------------------------------------*/
+                    
+                    // 創建音頻片段的主容器
+                    var audioContainer = document.createElement('div');
+                    audioContainer.style.cssText = 'margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9;';
+                    
+                    // 創建音頻播放控制器
+                    var au = document.createElement('audio');
+                    au.controls = true;                        // 顯示播放控制
+                    au.srcObject = null;                       // 清空媒體流
+                    au.src = URL.createObjectURL(blob);        // 設定音頻來源
+                    
+                    // 組織容器結構
+                    audioContainer.appendChild(au);            // 添加音頻控制器
+                    audioBlobsContainer.appendChild(audioContainer); // 添加到主容器
+                    audioBlobsContainer.appendChild(document.createElement('hr')); // 添加分隔線
+
+                    // 更新累積波形顯示
+                    appendBlobToAccumulatedWaveform(blob);
+                }
+            });
+
+            /*-----------------------------------------------------------
+             * 開始錄音並設定時間顯示
+             * 啟動錄音器並開始計時顯示
+             *----------------------------------------------------------*/
+            recorder.startRecording(); // 開始錄音
+
+            dateStarted = new Date().getTime(); // 記錄開始時間
+
+            /*-----------------------------------------------------------
+             * 錄音時間顯示循環
+             * 每秒更新一次錄音時長顯示
+             *----------------------------------------------------------*/
+            (function looper() {
+                if(!recorder) {
+                    return; // 如果錄音器不存在則停止循環
+                }
+
+                // 更新時長顯示：計算並顯示已錄音時間
+                document.querySelector('h3').innerHTML = 'Recording Duration: ' + 
+                    calculateTimeDuration((new Date().getTime() - dateStarted) / 1000);
+
+                setTimeout(looper, 1000); // 1秒後再次執行
+            })();
+
+            /*-----------------------------------------------------------
+             * 保存麥克風引用
+             * 為停止錄音時釋放麥克風做準備
+             *----------------------------------------------------------*/
+            recorder.microphone = microphone; // 保存麥克風引用
+        }).catch(function(err) {
+            console.error('Failed to initialize AudioContext:', err);
+            alert('無法初始化音頻系統，請重新整理頁面後再試。');
+            // 錯誤時恢復按鈕狀態
+            isCurrentlyRecording = false;
+            toggleButton.classList.remove('recording');
+            toggleButton.innerHTML = '● 開始錄音';
         });
-
-        /*-----------------------------------------------------------
-         * 開始錄音並設定時間顯示
-         * 啟動錄音器並開始計時顯示
-         *----------------------------------------------------------*/
-        recorder.startRecording(); // 開始錄音
-
-        dateStarted = new Date().getTime(); // 記錄開始時間
-
-        /*-----------------------------------------------------------
-         * 錄音時間顯示循環
-         * 每秒更新一次錄音時長顯示
-         *----------------------------------------------------------*/
-        (function looper() {
-            if(!recorder) {
-                return; // 如果錄音器不存在則停止循環
-            }
-
-            // 更新時長顯示：計算並顯示已錄音時間
-            document.querySelector('h3').innerHTML = 'Recording Duration: ' + 
-                calculateTimeDuration((new Date().getTime() - dateStarted) / 1000);
-
-            setTimeout(looper, 1000); // 1秒後再次執行
-        })();
-
-        /*-----------------------------------------------------------
-         * 保存麥克風引用並啟用停止按鈕
-         * 為停止錄音時釋放麥克風做準備
-         *----------------------------------------------------------*/
-        recorder.microphone = microphone; // 保存麥克風引用
-        document.getElementById('btn-stop-recording').disabled = false; // 啟用停止錄音按鈕
     });
-};
+}
 
 /*=================================================================
- * 停止錄音按鈕事件處理
- * 處理使用者點擊停止錄音時的所有邏輯
+ * 停止錄音函數
+ * 處理停止錄音時的所有邏輯
  *================================================================*/
 
-document.getElementById('btn-stop-recording').onclick = function() {
+function stopRecording() {
+    var toggleButton = document.getElementById('btn-toggle-recording');
+    
     /*---------------------------------------------------------------
      * 更新錄音狀態
      * 設定各種狀態變數並觸發停止錄音流程
      *--------------------------------------------------------------*/
-    this.disabled = true;                    // 禁用停止錄音按鈕
+    isCurrentlyRecording = false;            // 設定為非錄音中
     recorder.stopRecording(stopRecordingCallback); // 停止錄音並執行回調
     
     // 更新狀態變數
@@ -2226,8 +2372,10 @@ document.getElementById('btn-stop-recording').onclick = function() {
     is_recording = false;                    // 設定為非錄音中
     is_recorded = true;                      // 設定為已完成錄音
     
-    document.getElementById('btn-start-recording').disabled = false; // 重新啟用開始錄音按鈕
-};
+    // 更新按鈕樣式和文字
+    toggleButton.classList.remove('recording');
+    toggleButton.innerHTML = '● 開始錄音';
+}
 
 if (downloadButton) {
     downloadButton.onclick = function() {
@@ -2550,3 +2698,52 @@ function processInWebWorker(_function) {
     worker.workerURL = workerURL;        // 保存 URL 引用以便後續清理
     return worker;                       // 返回 Worker 實例
 }
+
+/*=================================================================
+ * AGC 控制初始化
+ * 處理 AGC 開關的互動邏輯
+ *================================================================*/
+
+// 等待 DOM 載入完成
+(function initAGCControl() {
+    // 獲取 AGC 開關元素
+    var agcToggle = document.getElementById('agc-toggle');
+    var toggleButton = document.getElementById('btn-toggle-recording');
+    
+    if (!agcToggle) {
+        return; // 如果找不到元素，直接返回
+    }
+    
+    // 監聽 AGC 開關變更事件
+    agcToggle.addEventListener('change', function() {
+        if (!isCurrentlyRecording) {
+            // 只有在未錄音時才允許變更
+            var message = this.checked 
+                ? 'AGC 已啟用：錄音時會自動調整音量，但可能有 1-3 秒的初始延遲'
+                : 'AGC 已停用：錄音將立即開始，但音量可能較小且不穩定';
+            
+            // 顯示提示訊息（可選）
+            console.log(message);
+        } else {
+            // 如果正在錄音，提示使用者
+            alert('請先停止錄音後再變更 AGC 設定');
+            // 恢復原來的狀態
+            this.checked = !this.checked;
+        }
+    });
+    
+    // 錄音時禁用 AGC 開關
+    var originalToggleOnClick = toggleButton ? toggleButton.onclick : null;
+    if (toggleButton && originalToggleOnClick) {
+        toggleButton.onclick = function() {
+            if (!isCurrentlyRecording) {
+                // 開始錄音時禁用 AGC 開關
+                agcToggle.disabled = true;
+            } else {
+                // 停止錄音時重新啟用 AGC 開關
+                agcToggle.disabled = false;
+            }
+            return originalToggleOnClick.call(this);
+        };
+    }
+})();

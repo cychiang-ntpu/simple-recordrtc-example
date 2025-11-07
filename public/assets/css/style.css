@@ -156,21 +156,34 @@ html {
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     }
     
-    #btn-start-recording {
+    /* 錄音切換按鈕 - 手機樣式 */
+    #btn-toggle-recording {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         order: 1;
+        position: relative;
+        transition: all 0.3s ease;
     }
     
-    #btn-stop-recording {
+    #btn-toggle-recording.recording {
         background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        animation: pulse 1.5s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% {
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+        }
+        50% {
+            box-shadow: 0 4px 20px rgba(245, 87, 108, 0.5);
+        }
+    }
+    
+    /* 播放按鈕 - 手機樣式 */
+    .play-button {
+        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
         color: white;
         order: 2;
-    }
-    
-    #btn-stop-recording:disabled {
-        background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
-        opacity: 0.5;
     }
     
     #btn-download-recording {
@@ -182,6 +195,55 @@ html {
     #btn-download-recording:disabled {
         background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
         opacity: 0.5;
+    }
+    
+    /* AGC 控制區 - 手機樣式 */
+    .agc-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin: 15px 8px 20px;
+        padding: 12px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        border-radius: 10px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+    
+    .agc-label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 600;
+        color: #2d3748;
+        margin: 0;
+        padding: 4px;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+    }
+    
+    .agc-label input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+        margin: 0;
+        accent-color: #667eea;
+    }
+    
+    .agc-label span {
+        line-height: 1.4;
+    }
+    
+    .agc-hint {
+        display: block;
+        color: #718096;
+        font-size: 12px;
+        text-align: center;
+        margin-top: 8px;
+        line-height: 1.5;
+        padding: 0 8px;
     }
     
     /* Canvas 波形 - 手機專用尺寸 */
@@ -284,6 +346,23 @@ html {
     
     #accum-zoom-reset {
         grid-column: 1 / -1;
+    }
+    
+    /* 播放按鈕特殊樣式 */
+    #accum-play-selection {
+        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        color: white;
+        font-weight: bold;
+        grid-column: 1 / -1;
+    }
+    
+    #accum-play-selection:hover:not(:disabled) {
+        background: linear-gradient(135deg, #45a049 0%, #388e3c 100%);
+        transform: translateY(-1px);
+    }
+    
+    #accum-play-selection:active:not(:disabled) {
+        background: linear-gradient(135deg, #388e3c 0%, #2e7d32 100%);
     }
     
     .waveform-toolbar .hint {
@@ -488,29 +567,43 @@ html {
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
     }
     
-    #btn-start-recording {
+    /* 錄音切換按鈕 - 平板樣式 */
+    #btn-toggle-recording {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
+        transition: all 0.3s ease;
     }
     
-    #btn-start-recording:hover {
+    #btn-toggle-recording:hover {
         background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
     }
     
-    #btn-stop-recording {
+    #btn-toggle-recording.recording {
         background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        color: white;
+        animation: pulse 1.5s ease-in-out infinite;
     }
     
-    #btn-stop-recording:hover {
+    #btn-toggle-recording.recording:hover {
         background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);
     }
     
-    #btn-stop-recording:disabled {
-        background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
-        opacity: 0.6;
-        cursor: not-allowed;
-        transform: none !important;
+    @keyframes pulse {
+        0%, 100% {
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+        }
+        50% {
+            box-shadow: 0 6px 20px rgba(245, 87, 108, 0.5);
+        }
+    }
+    
+    /* 播放按鈕 - 平板樣式 */
+    .play-button {
+        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        color: white;
+    }
+    
+    .play-button:hover {
+        background: linear-gradient(135deg, #45a049 0%, #4CAF50 100%);
     }
     
     #btn-download-recording {
@@ -526,6 +619,59 @@ html {
         background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
         opacity: 0.6;
         cursor: not-allowed;
+    }
+    
+    /* AGC 控制區 - 平板樣式 */
+    .agc-container {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        margin: 20px auto;
+        padding: 14px 20px;
+        max-width: 700px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        border-radius: 12px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+    }
+    
+    .agc-label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 600;
+        color: #2d3748;
+        margin: 0;
+        padding: 4px;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+    }
+    
+    .agc-label input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+        margin: 0;
+        accent-color: #667eea;
+    }
+    
+    .agc-label span {
+        line-height: 1.4;
+    }
+    
+    .agc-hint {
+        display: block;
+        color: #718096;
+        font-size: 13px;
+        text-align: center;
+        margin: 0;
+        line-height: 1.5;
+        width: 100%;
     }
     
     /* Canvas 波形 - 平板專用尺寸 */
@@ -651,6 +797,24 @@ html {
     .waveform-toolbar button:disabled {
         opacity: 0.4;
         cursor: not-allowed;
+    }
+    
+    /* 播放按鈕特殊樣式 - 平板 */
+    #accum-play-selection {
+        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        color: white;
+        font-weight: bold;
+        border-color: #4CAF50;
+    }
+    
+    #accum-play-selection:hover:not(:disabled) {
+        background: linear-gradient(135deg, #45a049 0%, #388e3c 100%);
+        border-color: #45a049;
+        box-shadow: 0 4px 10px rgba(76, 175, 80, 0.4);
+    }
+    
+    #accum-play-selection:active:not(:disabled) {
+        background: linear-gradient(135deg, #388e3c 0%, #2e7d32 100%);
     }
     
     .waveform-toolbar .hint {
@@ -873,31 +1037,47 @@ html {
         box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
     }
     
-    #btn-start-recording {
+    /* 錄音切換按鈕 - 桌機樣式 */
+    #btn-toggle-recording {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
     
-    #btn-start-recording:hover {
+    #btn-toggle-recording:hover {
         background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
         box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
     }
     
-    #btn-stop-recording {
+    #btn-toggle-recording.recording {
         background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        color: white;
+        animation: pulse 1.5s ease-in-out infinite;
     }
     
-    #btn-stop-recording:hover {
+    #btn-toggle-recording.recording:hover {
         background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);
         box-shadow: 0 8px 20px rgba(245, 87, 108, 0.4);
     }
     
-    #btn-stop-recording:disabled {
-        background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
-        opacity: 0.6;
-        cursor: not-allowed;
-        transform: none !important;
+    @keyframes pulse {
+        0%, 100% {
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+        }
+        50% {
+            box-shadow: 0 8px 24px rgba(245, 87, 108, 0.5);
+        }
+    }
+    
+    /* 播放按鈕 - 桌機樣式 */
+    .play-button {
+        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        color: white;
+        font-weight: 700;
+    }
+    
+    .play-button:hover {
+        background: linear-gradient(135deg, #45a049 0%, #4CAF50 100%);
+        box-shadow: 0 8px 20px rgba(76, 175, 80, 0.4);
     }
     
     #btn-download-recording {
@@ -914,6 +1094,76 @@ html {
         background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
         opacity: 0.6;
         cursor: not-allowed;
+    }
+    
+    /* AGC 控制區 - 桌機樣式 */    }
+    
+    /* AGC 控制區 - 桌機樣式 */
+    .agc-container {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+        gap: 15px;
+        margin: 25px auto;
+        padding: 16px 24px;
+        max-width: 950px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        border-radius: 15px;
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
+        transition: all 0.3s ease;
+    }
+    
+    .agc-container:hover {
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
+    }
+    
+    .agc-label {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 600;
+        color: #2d3748;
+        margin: 0;
+        padding: 6px;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        transition: color 0.3s ease;
+    }
+    
+    .agc-label:hover {
+        color: #667eea;
+    }
+    
+    .agc-label input[type="checkbox"] {
+        width: 22px;
+        height: 22px;
+        cursor: pointer;
+        margin: 0;
+        accent-color: #667eea;
+        transition: transform 0.2s ease;
+    }
+    
+    .agc-label input[type="checkbox"]:hover {
+        transform: scale(1.1);
+    }
+    
+    .agc-label span {
+        line-height: 1.4;
+    }
+    
+    .agc-hint {
+        display: block;
+        color: #718096;
+        font-size: 14px;
+        text-align: center;
+        margin: 0;
+        line-height: 1.5;
+        width: 100%;
     }
     
     /* Canvas 波形 - 桌機專用尺寸 */
@@ -1039,6 +1289,24 @@ html {
     .waveform-toolbar button:disabled {
         opacity: 0.4;
         cursor: not-allowed;
+    }
+    
+    /* 播放按鈕特殊樣式 - 桌機 */
+    #accum-play-selection {
+        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        color: white;
+        font-weight: bold;
+        border-color: #4CAF50;
+    }
+    
+    #accum-play-selection:hover:not(:disabled) {
+        background: linear-gradient(135deg, #45a049 0%, #388e3c 100%);
+        border-color: #45a049;
+        box-shadow: 0 6px 12px rgba(76, 175, 80, 0.4);
+    }
+    
+    #accum-play-selection:active:not(:disabled) {
+        background: linear-gradient(135deg, #388e3c 0%, #2e7d32 100%);
     }
     
     .waveform-toolbar .hint {
