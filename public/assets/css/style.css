@@ -1,162 +1,1139 @@
-/* RecordRTC Example Styles */
+/* ================================================================
+ * RecordRTC Example - 響應式樣式表
+ * 針對手機、平板、桌機分別設計，不共用 layout
+ * ================================================================ */
+
+/* ================================================================
+ * 基礎重置（所有裝置共用）
+ * ================================================================ */
+* {
+    box-sizing: border-box;
+}
+
 html, body {
     margin: 0 !important;
     padding: 0 !important;
-    font-family: Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft JhengHei', sans-serif;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* 防止縮放 */
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    -moz-text-size-adjust: 100%;
+    -ms-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
-h1 {
-    color: #333;
-    text-align: center;
-    margin: 20px 0;
+html {
+    /* 防止雙擊縮放 */
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
-h2 {
-    color: #666;
-    text-align: center;
-    margin: 15px 0;
+/* ================================================================
+ * 手機樣式（預設，480px 以下）
+ * 專為小螢幕優化的垂直佈局
+ * ================================================================ */
+@media screen and (max-width: 480px) {
+    /* 強制禁止縮放 */
+    html {
+        width: 100%;
+        height: 100%;
+        position: fixed;
+        overflow: hidden;
+    }
+    
+    body {
+        background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 8px;
+        width: 100%;
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+        position: relative;
+        /* 防止手勢縮放 */
+        touch-action: pan-y;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+    }
+    
+    /* 主容器 */
+    body::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.97);
+        z-index: -1;
+        margin: 5px;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+    
+    /* 標題區域 */
+    h1 {
+        color: #2d3748;
+        text-align: center;
+        margin: 8px 0 15px;
+        font-size: 1.3rem;
+        font-weight: 700;
+        padding: 0 8px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        line-height: 1.3;
+    }
+    
+    h2 {
+        color: #4a5568;
+        text-align: center;
+        margin: 10px 8px 18px;
+        font-size: 0.95rem;
+        padding: 12px 15px;
+        line-height: 1.5;
+        background: #f7fafc;
+        border-left: 3px solid #667eea;
+        border-radius: 6px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+    }
+    
+    h3, h4 {
+        color: #718096;
+        text-align: center;
+        margin: 10px 0;
+        font-size: 0.85rem;
+        font-weight: 600;
+        padding: 0 8px;
+    }
+    
+    /* 按鈕容器 - 手機專用垂直堆疊 */
+    .button-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        margin: 20px 8px;
+        padding: 0;
+    }
+    
+    br {
+        display: none;
+    }
+    
+    .button-container button,
+    button {
+        display: block;
+        width: calc(100% - 16px);
+        max-width: 100%;
+        margin: 0;
+        padding: 16px 20px;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 600;
+        min-height: 50px;
+        touch-action: manipulation;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+        /* 允許按鈕文字選取但防止縮放 */
+        -webkit-user-select: text;
+        -moz-user-select: text;
+        -ms-user-select: text;
+        user-select: text;
+    }
+    
+    button:active {
+        transform: scale(0.98);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    
+    #btn-start-recording {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        order: 1;
+    }
+    
+    #btn-stop-recording {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+        order: 2;
+    }
+    
+    #btn-stop-recording:disabled {
+        background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
+        opacity: 0.5;
+    }
+    
+    #btn-download-recording {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+        order: 3;
+    }
+    
+    #btn-download-recording:disabled {
+        background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
+        opacity: 0.5;
+    }
+    
+    /* Canvas 波形 - 手機專用尺寸 */
+    #waveform {
+        display: block;
+        width: calc(100% - 16px) !important;
+        height: 100px !important;
+        margin: 15px auto 20px !important;
+        border: none;
+        border-radius: 10px;
+        box-shadow: 0 6px 12px rgba(102, 126, 234, 0.15);
+        background: linear-gradient(135deg, #ffffff 0%, #f7fafc 100%);
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+    
+    #overview-waveform {
+        display: block;
+        width: calc(100% - 16px) !important;
+        height: 50px !important;
+        margin: 10px auto 15px !important;
+        border: 2px solid #667eea;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        cursor: pointer;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+    
+    #accumulated-waveform {
+        display: block;
+        width: calc(100% - 16px) !important;
+        height: 90px !important;
+        margin: 15px auto 20px !important;
+        border: 2px solid #e2e8f0;
+        border-radius: 10px;
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        background: linear-gradient(135deg, #ffffff 0%, #f7fafc 100%);
+        cursor: grab;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: none;
+    }
+    
+    #accumulated-waveform:active {
+        cursor: grabbing;
+    }
+    
+    /* 全局波形標籤容器 */
+    div[style*="text-align: center"] {
+        margin: 15px 8px;
+    }
+    
+    div[style*="text-align: center"] label {
+        font-weight: 600;
+        color: #4a5568;
+        font-size: 0.85rem;
+        margin-bottom: 6px;
+    }
+    
+    /* 工具列 - 手機專用緊湊佈局 */
+    .waveform-toolbar {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin: 15px 8px 20px;
+        padding: 12px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        border-radius: 12px;
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+    }
+    
+    .waveform-toolbar > div:first-child {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+    
+    .waveform-toolbar button {
+        width: 100%;
+        margin: 0;
+        padding: 12px 10px;
+        font-size: 13px;
+        font-weight: 600;
+        background: linear-gradient(135deg, #ffffff 0%, #f7fafc 100%);
+        border: 2px solid #e2e8f0;
+        border-radius: 8px;
+        color: #4a5568;
+        min-height: 48px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+    
+    .waveform-toolbar button:active {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-color: #667eea;
+    }
+    
+    #accum-zoom-reset {
+        grid-column: 1 / -1;
+    }
+    
+    .waveform-toolbar .hint {
+        font-size: 10px;
+        color: #718096;
+        text-align: center;
+        line-height: 1.4;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.6);
+        border-radius: 6px;
+        margin: 0;
+    }
+    
+    /* Audio 播放器 */
+    audio {
+        display: block;
+        width: calc(100% - 16px);
+        margin: 15px auto;
+        border-radius: 30px;
+        box-shadow: 0 3px 8px rgba(102, 126, 234, 0.2);
+    }
+    
+    /* 選取播放控制 */
+    #selection-playback-controls {
+        margin: 12px 8px;
+        text-align: center;
+    }
+    
+    #selection-playback-controls button {
+        width: auto;
+        display: inline-block;
+        font-size: 12px;
+        padding: 10px 16px;
+        margin: 4px;
+        min-height: 44px;
+    }
+    
+    /* 錄音片段容器 */
+    #audio-blobs-container {
+        margin: 15px 8px 20px;
+        padding: 15px 12px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        border-radius: 12px;
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+        border: 2px solid #e2e8f0;
+    }
+    
+    #audio-blobs-container h2 {
+        font-size: 1rem;
+        margin-bottom: 12px;
+        padding: 8px 12px;
+    }
+    
+    /* 分隔線 */
+    hr {
+        margin: 25px auto;
+        border: none;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, #e2e8f0, transparent);
+        max-width: 90%;
+    }
+    
+    /* Footer */
+    footer {
+        text-align: center;
+        padding: 15px 8px;
+        margin-top: 20px;
+        color: #718096;
+        font-size: 11px;
+    }
 }
 
-h3, h4 {
-    color: #777;
-    text-align: center;
-    margin: 10px 0;
+/* ================================================================
+ * 平板樣式（481px - 1024px）
+ * 中等螢幕的混合佈局
+ * ================================================================ */
+@media screen and (min-width: 481px) and (max-width: 1024px) {
+    /* 強制禁止縮放 */
+    html {
+        width: 100%;
+        height: 100%;
+        position: fixed;
+        overflow: hidden;
+    }
+    
+    body {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 15px 20px;
+        width: 100%;
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+        position: relative;
+        /* 防止手勢縮放 */
+        touch-action: pan-y;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+    }
+    
+    /* 主容器 */
+    body::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.96);
+        z-index: -1;
+        margin: 10px;
+        border-radius: 18px;
+        box-shadow: 0 15px 40px rgba(0, 0, 0, 0.25);
+    }
+    
+    /* 標題區域 */
+    h1 {
+        color: #2d3748;
+        text-align: center;
+        margin: 15px 0 25px;
+        font-size: 1.8rem;
+        font-weight: 700;
+        padding: 0 15px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        letter-spacing: -0.3px;
+    }
+    
+    h2 {
+        color: #4a5568;
+        text-align: center;
+        margin: 15px auto 30px;
+        font-size: 1.15rem;
+        padding: 16px 25px;
+        line-height: 1.6;
+        background: #f7fafc;
+        border-left: 4px solid #667eea;
+        border-radius: 10px;
+        max-width: 700px;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06);
+    }
+    
+    h3, h4 {
+        color: #718096;
+        text-align: center;
+        margin: 12px 0;
+        font-size: 1rem;
+        font-weight: 600;
+    }
+    
+    /* 按鈕容器 - 平板使用水平居中排列 */
+    .button-container {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        margin: 25px auto;
+        padding: 0;
+        max-width: 700px;
+    }
+    
+    br {
+        display: none;
+    }
+    
+    /* 按鈕樣式 */
+    .button-container button,
+    body > button {
+        display: inline-block;
+        width: auto;
+        min-width: 160px;
+        margin: 0;
+        padding: 14px 28px;
+        border: none;
+        border-radius: 12px;
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 600;
+        min-height: 50px;
+        touch-action: manipulation;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+        vertical-align: middle;
+    }
+    
+    .button-container button:hover,
+    body > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.18);
+    }
+    
+    .button-container button:active,
+    body > button:active {
+        transform: translateY(0);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    #btn-start-recording {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+    
+    #btn-start-recording:hover {
+        background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+    }
+    
+    #btn-stop-recording {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+    }
+    
+    #btn-stop-recording:hover {
+        background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);
+    }
+    
+    #btn-stop-recording:disabled {
+        background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none !important;
+    }
+    
+    #btn-download-recording {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+    }
+    
+    #btn-download-recording:hover:not(:disabled) {
+        background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+    }
+    
+    #btn-download-recording:disabled {
+        background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+    
+    /* Canvas 波形 - 平板專用尺寸 */
+    #waveform {
+        display: block;
+        width: 90% !important;
+        max-width: 700px !important;
+        height: 140px !important;
+        margin: 25px auto 30px !important;
+        border: none;
+        border-radius: 12px;
+        box-shadow: 0 8px 16px rgba(102, 126, 234, 0.15);
+        background: linear-gradient(135deg, #ffffff 0%, #f7fafc 100%);
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+    
+    #overview-waveform {
+        display: block;
+        width: 90% !important;
+        max-width: 700px !important;
+        height: 70px !important;
+        margin: 15px auto 20px !important;
+        border: 3px solid #667eea;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+    
+    #overview-waveform:hover {
+        border-color: #764ba2;
+        box-shadow: 0 8px 16px rgba(118, 75, 162, 0.2);
+        transform: translateY(-2px);
+    }
+    
+    #accumulated-waveform {
+        display: block;
+        width: 90% !important;
+        max-width: 700px !important;
+        height: 120px !important;
+        margin: 20px auto 25px !important;
+        border: 2px solid #e2e8f0;
+        border-radius: 12px;
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+        background: linear-gradient(135deg, #ffffff 0%, #f7fafc 100%);
+        cursor: grab;
+        user-select: none;
+        -webkit-user-select: none;
+        transition: box-shadow 0.3s ease;
+    }
+    
+    #accumulated-waveform:hover {
+        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.2);
+    }
+    
+    #accumulated-waveform:active {
+        cursor: grabbing;
+    }
+    
+    /* 全局波形標籤容器 */
+    div[style*="text-align: center"] {
+        margin: 20px auto;
+        max-width: 700px;
+    }
+    
+    div[style*="text-align: center"] label {
+        font-weight: 600;
+        color: #4a5568;
+        font-size: 0.95rem;
+        margin-bottom: 8px;
+    }
+    
+    /* 工具列 - 平板使用水平佈局 */
+    .waveform-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        margin: 20px auto 30px;
+        padding: 16px 20px;
+        max-width: 700px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        border-radius: 15px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+    
+    .waveform-toolbar button {
+        flex: 0 1 auto;
+        padding: 12px 20px;
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+        background: linear-gradient(135deg, #ffffff 0%, #f7fafc 100%);
+        border: 2px solid #e2e8f0;
+        border-radius: 10px;
+        color: #4a5568;
+        min-height: 48px;
+        min-width: 100px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+    }
+    
+    .waveform-toolbar button:hover:not(:disabled) {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-color: #667eea;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 10px rgba(102, 126, 234, 0.3);
+    }
+    
+    .waveform-toolbar button:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
+    }
+    
+    .waveform-toolbar button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+    
+    .waveform-toolbar .hint {
+        flex: 1 1 100%;
+        font-size: 12px;
+        color: #718096;
+        text-align: center;
+        line-height: 1.5;
+        padding: 10px 15px;
+        background: rgba(255, 255, 255, 0.6);
+        border-radius: 8px;
+        margin-top: 5px;
+    }
+    
+    /* Audio 播放器 */
+    audio {
+        display: block;
+        width: 85%;
+        max-width: 600px;
+        margin: 25px auto;
+        border-radius: 40px;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+    }
+    
+    /* 選取播放控制 */
+    #selection-playback-controls {
+        margin: 15px auto;
+        text-align: center;
+        max-width: 700px;
+    }
+    
+    #selection-playback-controls button {
+        font-size: 13px;
+        padding: 10px 20px;
+        margin: 6px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        min-height: 44px;
+        box-shadow: 0 3px 8px rgba(102, 126, 234, 0.3);
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    #selection-playback-controls button:hover {
+        background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        transform: translateY(-2px);
+    }
+    
+    /* 錄音片段容器 */
+    #audio-blobs-container {
+        margin: 25px auto 30px;
+        padding: 25px 20px;
+        max-width: 700px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        border-radius: 15px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        border: 2px solid #e2e8f0;
+    }
+    
+    #audio-blobs-container h2 {
+        margin-bottom: 20px;
+    }
+    
+    /* 分隔線 */
+    hr {
+        margin: 35px auto;
+        border: none;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, #e2e8f0, transparent);
+        max-width: 85%;
+    }
+    
+    /* Footer */
+    footer {
+        text-align: center;
+        padding: 20px;
+        margin-top: 30px;
+        color: #718096;
+        font-size: 12px;
+    }
 }
 
-button {
-    padding: 10px 20px;
-    margin: 5px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-}
-
-#btn-start-recording {
-    background-color: #4CAF50;
-    color: white;
-}
-
-#btn-start-recording:hover {
-    background-color: #45a049;
-}
-
-#btn-stop-recording {
-    background-color: #f44336;
-    color: white;
-}
-
-#btn-stop-recording:hover {
-    background-color: #da190b;
-}
-
-#btn-stop-recording:disabled {
-    background-color: #cccccc;
-    cursor: not-allowed;
-}
-
-#waveform,
-#accumulated-waveform,
-#overview-waveform {
-    display: block;
-    margin: 0 auto 20px auto;
-    border: 1px solid #ccc;
-}
-
-#waveform {
-    margin-top: 20px;
-}
-
-#accumulated-waveform {
-    cursor: grab;
-    user-select: none;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-}
-
-#accumulated-waveform:active {
-    cursor: grabbing;
-}
-
-#overview-waveform {
-    cursor: pointer;
-    border: 2px solid #1E88E5;
-    background-color: #f5f5f5;
-    user-select: none;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-}
-
-#selection-playback-controls button {
-    font-size: 13px;
-    padding: 6px 12px;
-}
-
-#selection-playback-controls button:hover {
-    opacity: 0.9;
-}
-
-#selection-playback-controls button:active {
-    transform: scale(0.98);
-}
-
-.waveform-toolbar {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin: 10px auto 25px;
-    max-width: 760px;
-}
-
-.waveform-toolbar button {
-    background-color: #f5f5f5;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    padding: 6px 12px;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.waveform-toolbar button:hover {
-    background-color: #e9e9e9;
-}
-
-.waveform-toolbar button:active {
-    background-color: #dcdcdc;
-}
-
-.waveform-toolbar .hint {
-    font-size: 12px;
-    color: #666;
-    margin-left: 6px;
-}
-
-#view1 {
-    display: block;
-    margin: 20px auto;
-    border: 1px solid #ccc;
-}
-
-audio {
-    display: block;
-    margin: 20px auto;
-    width: 100%;
-    max-width: 500px;
-}
-
-#audio-blobs-container {
-    margin-top: 20px;
-    padding: 20px;
-    background-color: #f9f9f9;
-    border-radius: 4px;
-}
-
-hr {
-    margin: 30px 0;
-    border: none;
-    border-top: 1px solid #eee;
+/* ================================================================
+ * 桌機樣式（1025px 以上）
+ * 大螢幕的寬敞佈局
+ * ================================================================ */
+@media screen and (min-width: 1025px) {
+    body {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 25px 40px;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+    
+    /* 主容器 */
+    body::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: calc(100% - 80px);
+        max-width: 1400px;
+        height: calc(100% - 40px);
+        background: rgba(255, 255, 255, 0.95);
+        z-index: -1;
+        margin: 20px 0;
+        border-radius: 25px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+    
+    /* 標題區域 */
+    h1 {
+        color: #2d3748;
+        text-align: center;
+        margin: 20px 0 40px;
+        font-size: 2.5rem;
+        font-weight: 700;
+        padding: 0 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        letter-spacing: -0.5px;
+    }
+    
+    h2 {
+        color: #4a5568;
+        text-align: center;
+        margin: 20px auto 40px;
+        font-size: 1.3rem;
+        padding: 20px 35px;
+        line-height: 1.7;
+        background: #f7fafc;
+        border-left: 5px solid #667eea;
+        border-radius: 12px;
+        max-width: 900px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+    }
+    
+    h3, h4 {
+        color: #718096;
+        text-align: center;
+        margin: 15px 0;
+        font-size: 1.1rem;
+        font-weight: 600;
+    }
+    
+    /* 按鈕容器 - 桌機使用水平居中排列 */
+    .button-container {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+        gap: 12px;
+        margin: 30px auto;
+        padding: 0;
+        max-width: 950px;
+    }
+    
+    br + button:first-of-type,
+    h4 + br + button {
+        display: inline-block;
+    }
+    
+    .button-container button,
+    body > button {
+        display: inline-block;
+        width: auto;
+        min-width: 180px;
+        margin: 0;
+        padding: 16px 32px;
+        border: none;
+        border-radius: 12px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 600;
+        min-height: 54px;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+        vertical-align: middle;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .button-container button::before,
+    body > button::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.3);
+        transform: translate(-50%, -50%);
+        transition: width 0.6s, height 0.6s;
+    }
+    
+    .button-container button:active::before,
+    body > button:active::before {
+        width: 300px;
+        height: 300px;
+    }
+    
+    .button-container button:hover,
+    body > button:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+    }
+    
+    .button-container button:active,
+    body > button:active {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+    }
+    
+    #btn-start-recording {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+    
+    #btn-start-recording:hover {
+        background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+    }
+    
+    #btn-stop-recording {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+    }
+    
+    #btn-stop-recording:hover {
+        background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);
+        box-shadow: 0 8px 20px rgba(245, 87, 108, 0.4);
+    }
+    
+    #btn-stop-recording:disabled {
+        background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none !important;
+    }
+    
+    #btn-download-recording {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+    }
+    
+    #btn-download-recording:hover:not(:disabled) {
+        background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+        box-shadow: 0 8px 20px rgba(79, 172, 254, 0.4);
+    }
+    
+    #btn-download-recording:disabled {
+        background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+    
+    /* Canvas 波形 - 桌機專用尺寸 */
+    #waveform {
+        display: block;
+        width: 85% !important;
+        max-width: 950px !important;
+        height: 180px !important;
+        margin: 35px auto 40px !important;
+        border: none;
+        border-radius: 15px;
+        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.15);
+        background: linear-gradient(135deg, #ffffff 0%, #f7fafc 100%);
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+    
+    #overview-waveform {
+        display: block;
+        width: 85% !important;
+        max-width: 950px !important;
+        height: 90px !important;
+        margin: 20px auto 25px !important;
+        border: 3px solid #667eea;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+    
+    #overview-waveform:hover {
+        border-color: #764ba2;
+        box-shadow: 0 12px 24px rgba(118, 75, 162, 0.2);
+        transform: translateY(-3px);
+    }
+    
+    #accumulated-waveform {
+        display: block;
+        width: 85% !important;
+        max-width: 950px !important;
+        height: 150px !important;
+        margin: 25px auto 30px !important;
+        border: 2px solid #e2e8f0;
+        border-radius: 15px;
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        background: linear-gradient(135deg, #ffffff 0%, #f7fafc 100%);
+        cursor: grab;
+        user-select: none;
+        -webkit-user-select: none;
+        transition: box-shadow 0.3s ease;
+    }
+    
+    #accumulated-waveform:hover {
+        box-shadow: 0 12px 24px rgba(102, 126, 234, 0.2);
+    }
+    
+    #accumulated-waveform:active {
+        cursor: grabbing;
+    }
+    
+    /* 全局波形標籤容器 */
+    div[style*="text-align: center"] {
+        margin: 25px auto;
+        max-width: 950px;
+    }
+    
+    div[style*="text-align: center"] label {
+        font-weight: 700;
+        color: #4a5568;
+        font-size: 1.05rem;
+        margin-bottom: 10px;
+    }
+    
+    /* 工具列 - 桌機使用寬敞的水平佈局 */
+    .waveform-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+        gap: 12px;
+        margin: 25px auto 35px;
+        padding: 20px 30px;
+        max-width: 950px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        border-radius: 18px;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+    }
+    
+    .waveform-toolbar button {
+        flex: 0 1 auto;
+        padding: 14px 24px;
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        background: linear-gradient(135deg, #ffffff 0%, #f7fafc 100%);
+        border: 2px solid #e2e8f0;
+        border-radius: 12px;
+        color: #4a5568;
+        min-height: 52px;
+        min-width: 120px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.05);
+    }
+    
+    .waveform-toolbar button:hover:not(:disabled) {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-color: #667eea;
+        transform: translateY(-3px);
+        box-shadow: 0 6px 12px rgba(102, 126, 234, 0.3);
+    }
+    
+    .waveform-toolbar button:active:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 3px 6px rgba(102, 126, 234, 0.2);
+    }
+    
+    .waveform-toolbar button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+    
+    .waveform-toolbar .hint {
+        flex: 1 1 100%;
+        font-size: 13px;
+        color: #718096;
+        text-align: center;
+        line-height: 1.6;
+        padding: 12px 20px;
+        background: rgba(255, 255, 255, 0.6);
+        border-radius: 10px;
+        margin-top: 8px;
+    }
+    
+    /* Audio 播放器 */
+    audio {
+        display: block;
+        width: 75%;
+        max-width: 700px;
+        margin: 30px auto;
+        border-radius: 50px;
+        box-shadow: 0 6px 16px rgba(102, 126, 234, 0.2);
+    }
+    
+    /* 選取播放控制 */
+    #selection-playback-controls {
+        margin: 20px auto;
+        text-align: center;
+        max-width: 950px;
+    }
+    
+    #selection-playback-controls button {
+        font-size: 14px;
+        padding: 12px 24px;
+        margin: 8px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        min-height: 48px;
+        box-shadow: 0 4px 10px rgba(102, 126, 234, 0.3);
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    #selection-playback-controls button:hover {
+        background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+        transform: translateY(-2px);
+    }
+    
+    #selection-playback-controls button:active {
+        transform: translateY(0);
+        box-shadow: 0 3px 8px rgba(102, 126, 234, 0.3);
+    }
+    
+    /* 錄音片段容器 */
+    #audio-blobs-container {
+        margin: 35px auto 40px;
+        padding: 30px 35px;
+        max-width: 950px;
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        border-radius: 18px;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+        border: 2px solid #e2e8f0;
+    }
+    
+    #audio-blobs-container h2 {
+        margin-bottom: 25px;
+    }
+    
+    /* 分隔線 */
+    hr {
+        margin: 45px auto;
+        border: none;
+        height: 3px;
+        background: linear-gradient(90deg, transparent, #e2e8f0, transparent);
+        max-width: 80%;
+    }
+    
+    /* Footer */
+    footer {
+        text-align: center;
+        padding: 25px;
+        margin-top: 40px;
+        color: #718096;
+        font-size: 13px;
+    }
+    
+    /* View1 (如果存在) */
+    #view1 {
+        display: block;
+        margin: 25px auto;
+        border: none;
+        border-radius: 12px;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+    }
 }

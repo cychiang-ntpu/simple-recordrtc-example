@@ -4,6 +4,8 @@
     <title>Process RAW PCM data using RecordRTC</title>
     <!-- 字符編碼設定 -->
     <meta charset="utf-8">
+    <!-- 響應式設計 viewport 設定：禁止使用者縮放 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no">
     <!-- 引入自定義樣式表 -->
     <link rel="stylesheet" href="assets/css/style.css">
     <!-- 移除 WaveSurfer.js，改用原生 Canvas 實現波形顯示 -->
@@ -19,14 +21,12 @@
 <!-- 預留的標題區域 -->
 <h4>what?</h4>
 
-<!-- 分隔線 -->
-<br>
 <!-- 錄音控制按鈕區域 -->
-<button id="btn-start-recording">開始錄音</button>
-<button id="btn-stop-recording" disabled>結束錄音</button>
-<button id="btn-download-recording" disabled>下載錄音</button>
-
-<br>
+<div class="button-container">
+    <button id="btn-start-recording">開始錄音</button>
+    <button id="btn-stop-recording" disabled>結束錄音</button>
+    <button id="btn-download-recording" disabled>下載錄音</button>
+</div>
 
 <!-- 即時波形顯示 -->
 <canvas id="waveform" width="750" height="200"></canvas>
