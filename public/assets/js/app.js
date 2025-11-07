@@ -287,6 +287,12 @@ function AccumulatedWaveform(canvas) {
     this.viewStart = 0;                    // 可視範圍起始樣本索引
     this.isAutoScroll = true;              // 是否自動捲動到最新資料
     this._panRemainder = 0;                // 平滑平移時的殘餘樣本量
+    
+    // 播放位置相關
+    this.playbackPosition = 0;             // 當前播放位置（樣本索引）
+    this.isPlaying = false;                // 是否正在播放
+    this.playbackStartTime = 0;            // 播放開始時間戳記
+    this.playbackStartSample = 0;          // 播放開始的樣本位置
 
     this.clear();
     setAccumulatedControlsEnabled(false);
@@ -572,6 +578,39 @@ AccumulatedWaveform.prototype.draw = function() {
         }
     }
     
+    // 繪製播放位置指示器（紅色垂直線）
+    if (this.playbackPosition >= 0 && this.playbackPosition <= totalSamples) {
+        // 檢查播放位置是否在可視範圍內
+        if (this.playbackPosition >= startSample && this.playbackPosition <= endSample) {
+            var playbackX = ((this.playbackPosition - startSample) / visibleSamples) * width;
+            
+            // 繪製紅色垂直線
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(playbackX, 0);
+            ctx.lineTo(playbackX, height);
+            ctx.stroke();
+            
+            // 繪製頂部三角形指示器
+            ctx.fillStyle = '#FF0000';
+            ctx.beginPath();
+            ctx.moveTo(playbackX, 0);
+            ctx.lineTo(playbackX - 6, 10);
+            ctx.lineTo(playbackX + 6, 10);
+            ctx.closePath();
+            ctx.fill();
+            
+            // 繪製底部三角形指示器
+            ctx.beginPath();
+            ctx.moveTo(playbackX, height);
+            ctx.lineTo(playbackX - 6, height - 10);
+            ctx.lineTo(playbackX + 6, height - 10);
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+    
     // 同步更新全局波形視圖
     if (overviewWaveform) {
         overviewWaveform.draw();
@@ -826,6 +865,64 @@ AccumulatedWaveform.prototype._getSamplePair = function(index) {
     };
 };
 
+/**
+ * 設定播放位置
+ * @param {number} sampleIndex - 樣本索引
+ */
+AccumulatedWaveform.prototype.setPlaybackPosition = function(sampleIndex) {
+    this.playbackPosition = Math.max(0, Math.min(sampleIndex, this.sampleCount));
+    this.draw();
+};
+
+/**
+ * 開始播放並初始化播放追蹤
+ * @param {number} startSample - 開始播放的樣本位置
+ * @param {number} sampleRate - 採樣率
+ */
+AccumulatedWaveform.prototype.startPlayback = function(startSample, sampleRate) {
+    this.isPlaying = true;
+    this.playbackStartSample = startSample;
+    this.playbackPosition = startSample;
+    this.playbackStartTime = audioContext.currentTime;
+    this.sourceSampleRate = sampleRate || this.sourceSampleRate;
+    
+    // 開始動畫循環更新播放位置
+    this._updatePlaybackPosition();
+};
+
+/**
+ * 停止播放
+ */
+AccumulatedWaveform.prototype.stopPlayback = function() {
+    this.isPlaying = false;
+    this.draw();
+};
+
+/**
+ * 更新播放位置（內部方法，用於動畫循環）
+ */
+AccumulatedWaveform.prototype._updatePlaybackPosition = function() {
+    if (!this.isPlaying) {
+        return;
+    }
+    
+    // 計算當前播放位置
+    var elapsed = audioContext.currentTime - this.playbackStartTime;
+    var samplesPassed = elapsed * this.sourceSampleRate;
+    var decimatedSamplesPassed = samplesPassed / this.decimationFactor;
+    
+    this.playbackPosition = this.playbackStartSample + decimatedSamplesPassed;
+    
+    // 重繪波形
+    this.draw();
+    
+    // 繼續動畫循環
+    var self = this;
+    requestAnimationFrame(function() {
+        self._updatePlaybackPosition();
+    });
+};
+
 /*=================================================================
  * OverviewWaveform 類 - 全局波形視圖
  * 顯示整體波形並標示當前 AccumulatedWaveform 的觀察區域
@@ -1037,7 +1134,7 @@ function appendBlobToAccumulatedWaveform(blob) {
  * 播放選取的音訊範圍或整句
  */
 function playSelectedOrFullAudio() {
-    if (!latestRecordingBlob || !audioContext) {
+    if (!latestRecordingBlob || !audioContext || !accumulatedWaveform) {
         console.warn('沒有可播放的音訊');
         return;
     }
@@ -1051,6 +1148,11 @@ function playSelectedOrFullAudio() {
         }
         selectionAudioSource = null;
     }
+    
+    // 停止之前的播放動畫
+    if (accumulatedWaveform) {
+        accumulatedWaveform.stopPlayback();
+    }
 
     latestRecordingBlob.arrayBuffer().then(function(arrayBuffer) {
         return audioContext.decodeAudioData(arrayBuffer);
@@ -1058,17 +1160,34 @@ function playSelectedOrFullAudio() {
         var sampleRate = audioBuffer.sampleRate;
         var channelData = audioBuffer.getChannelData(0);
         
-        // 判斷是播放選取範圍還是整句
-        var hasSelection = (selectionStart !== null && selectionEnd !== null);
+        // 判斷播放起始位置
         var startSample, endSample;
+        var playFromPosition = false;
         
-        if (hasSelection) {
-            // 計算選取範圍對應的實際樣本索引
+        // 優先使用播放位置指示器
+        if (accumulatedWaveform.playbackPosition > 0 && 
+            accumulatedWaveform.playbackPosition < accumulatedWaveform.sampleCount) {
+            // 從播放位置開始
+            var decimationFactor = accumulatedWaveform.decimationFactor;
+            startSample = Math.floor(accumulatedWaveform.playbackPosition * decimationFactor);
+            playFromPosition = true;
+            
+            // 如果有選取範圍，播放到選取範圍結束
+            if (selectionStart !== null && selectionEnd !== null) {
+                var selEnd = Math.max(selectionStart, selectionEnd);
+                endSample = Math.min(channelData.length, Math.ceil(selEnd * decimationFactor));
+            } else {
+                // 否則播放到結尾
+                endSample = channelData.length;
+            }
+            
+            console.log('從播放位置開始: 樣本 ' + startSample);
+        } else if (selectionStart !== null && selectionEnd !== null) {
+            // 有選取範圍，播放選取範圍
             var decimationFactor = accumulatedWaveform.decimationFactor;
             startSample = Math.min(selectionStart, selectionEnd) * decimationFactor;
             endSample = Math.max(selectionStart, selectionEnd) * decimationFactor;
             
-            // 確保範圍有效
             startSample = Math.max(0, Math.floor(startSample));
             endSample = Math.min(channelData.length, Math.ceil(endSample));
             
@@ -1081,11 +1200,11 @@ function playSelectedOrFullAudio() {
         }
         
         if (startSample >= endSample) {
-            console.warn('選取範圍無效');
+            console.warn('播放範圍無效');
             return;
         }
         
-        // 提取選取範圍的音訊數據
+        // 提取播放範圍的音訊數據
         var duration = (endSample - startSample) / sampleRate;
         var newBuffer = audioContext.createBuffer(1, endSample - startSample, sampleRate);
         var newChannelData = newBuffer.getChannelData(0);
@@ -1099,9 +1218,19 @@ function playSelectedOrFullAudio() {
         selectionAudioSource.buffer = newBuffer;
         selectionAudioSource.connect(audioContext.destination);
         
+        // 開始播放動畫
+        var decimationFactor = accumulatedWaveform.decimationFactor;
+        var startSampleDecimated = startSample / decimationFactor;
+        accumulatedWaveform.startPlayback(startSampleDecimated, sampleRate);
+        
         // 播放結束後清理
         selectionAudioSource.onended = function() {
             selectionAudioSource = null;
+            if (accumulatedWaveform) {
+                accumulatedWaveform.stopPlayback();
+                // 播放結束後，播放位置停留在結束位置
+                accumulatedWaveform.setPlaybackPosition(endSample / decimationFactor);
+            }
             console.log('播放完成');
         };
         
@@ -1110,6 +1239,9 @@ function playSelectedOrFullAudio() {
         
     }).catch(function(error) {
         console.error('播放失敗:', error);
+        if (accumulatedWaveform) {
+            accumulatedWaveform.stopPlayback();
+        }
     });
 }
 
@@ -1252,7 +1384,9 @@ function bindAccumulatedWaveformInteractions(canvas) {
                 accumulatedWaveform.draw();
                 canvas.style.cursor = 'crosshair';
             }
-        } else {
+        } else if (event.button === 0 && !event.ctrlKey && !event.metaKey) {
+            // 左鍵單擊（非 Ctrl/Cmd）：移動播放位置或其他操作
+            
             // 檢查是否直接點擊在選取區域邊緣（觸控設備優化）
             var edge = getSelectionEdgeAt(clickX, rect);
             
@@ -1270,6 +1404,15 @@ function bindAccumulatedWaveformInteractions(canvas) {
                     navigator.vibrate(50);
                 }
             } else {
+                // 先設置播放位置（點擊時立即設置）
+                var visibleSamples = accumulatedWaveform.getVisibleSamples();
+                var sampleRatio = clickX / rect.width;
+                var clickedSample = Math.floor(accumulatedWaveform.viewStart + sampleRatio * visibleSamples);
+                
+                // 限制在有效範圍內
+                clickedSample = Math.max(0, Math.min(clickedSample, accumulatedWaveform.sampleCount));
+                accumulatedWaveform.setPlaybackPosition(clickedSample);
+                
                 // 開始長按檢測（用於觸控設備選取）
                 isLongPress = false;
                 longPressTimer = setTimeout(function() {
@@ -1281,9 +1424,7 @@ function bindAccumulatedWaveformInteractions(canvas) {
                         selectionStartX = clickX;
                         
                         // 計算選取起始樣本
-                        var visibleSamples = accumulatedWaveform.getVisibleSamples();
-                        var sampleRatio = clickX / rect.width;
-                        selectionStart = Math.floor(accumulatedWaveform.viewStart + sampleRatio * visibleSamples);
+                        selectionStart = clickedSample;
                         selectionEnd = selectionStart;
                         
                         // 清除舊的播放控制
@@ -1313,6 +1454,15 @@ function bindAccumulatedWaveformInteractions(canvas) {
                 accumulatedWaveform.isAutoScroll = false;
                 canvas.style.cursor = 'grabbing';
             }
+        } else {
+            // 其他情況（如 Ctrl+點擊）：原有的拖曳行為
+            clearLongPressTimer();
+            isDragging = true;
+            isSelecting = false;
+            isResizingSelection = false;
+            lastX = event.clientX;
+            accumulatedWaveform.isAutoScroll = false;
+            canvas.style.cursor = 'grabbing';
         }
         
         try {
