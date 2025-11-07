@@ -1,0 +1,49 @@
+{
+  "name": "simple-recordrtc-library",
+  "version": "1.0.0",
+  "description": "A modular audio recording and waveform visualization library based on RecordRTC",
+  "type": "module",
+  "main": "public/assets/js/lib/index.js",
+  "exports": {
+    ".": {
+      "import": "./public/assets/js/lib/index.js",
+      "require": "./public/assets/js/lib/index.cjs"
+    },
+    "./LiveWaveform": {
+      "import": "./public/assets/js/lib/LiveWaveform.js"
+    },
+    "./AccumulatedWaveform": {
+      "import": "./public/assets/js/lib/AccumulatedWaveform.js"
+    },
+    "./RecordingManager": {
+      "import": "./public/assets/js/lib/RecordingManager.js"
+    },
+    "./AudioProcessor": {
+      "import": "./public/assets/js/lib/AudioProcessor.js"
+    }
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "recordrtc",
+    "audio",
+    "recording",
+    "waveform",
+    "visualization",
+    "canvas",
+    "web-audio"
+  ],
+  "author": "",
+  "license": "MIT",
+  "peerDependencies": {
+    "recordrtc": ">=5.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cychiang-ntpu/simple-recordrtc-example.git"
+  },
+  "files": [
+    "public/assets/js/lib/"
+  ]
+}
