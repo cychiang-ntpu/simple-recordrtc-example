@@ -51,22 +51,28 @@ function draw(params){
   const centerY = height/2;
   const centerX = width/2;
   const samplesPerPixel = (end-start)/(verticalMode?height:width);
+  const dpr = (typeof params.dpr === 'number' && params.dpr > 0) ? params.dpr : 1;
   ctx.strokeStyle = '#1E88E5';
   ctx.lineWidth = 1;
   ctx.beginPath();
   // 若收到原始 PCM（rawPcm）且可視樣本數很少，改用連續線描高解析度
   const highResPcm = params.rawPcm instanceof Float32Array ? params.rawPcm : null;
-  const highResMode = !!highResPcm && visibleSamples <= 4; // 高倍放大模式條件
+  // 動態細緻度：以可視原始樣本密度決定
+  const pixelCount = verticalMode ? height : width;
+  const visibleRawFromMsg = (typeof params.visibleRaw === 'number' && params.visibleRaw > 0) ? params.visibleRaw : (visibleSamples * Math.max(1, decimationFactor));
+  const densityR = (pixelCount > 0) ? (visibleRawFromMsg / (pixelCount * dpr)) : 0; // 每像素幾個原始樣本
+  // 細緻度權重（0~1）：r 越小越接近 1（更細緻）
+  const detail = Math.max(0, Math.min(1, 1 / (1 + densityR)));
+  // 高解析線描條件：有 rawPcm 且密度不高（<= ~1.5 個樣本/像素）或傳統條件
+  const highResMode = !!highResPcm && (densityR <= 1.5 || visibleSamples <= 4);
   // 自動密度調整：用於曲線（線段），圓點永遠使用原始樣本列（不插值）
   const origForDots = highResPcm;
   let pcmForDraw = highResPcm;
-  // 依縮放程度計算細緻度（0~1）：視窗 decimated 樣本越少，detail 越高
-  const detail = Math.max(0, Math.min(1, 4 / Math.max(1, visibleSamples)));
   if (highResMode && pcmForDraw) {
-    const pixelCount = verticalMode ? (height) : (width);
+    // 期望曲線點數：接近像素數，並隨細緻度微調
+    const px = pixelCount;
     const len = pcmForDraw.length;
-    // 期望曲線點數，隨 detail 增加而接近像素數
-    const desired = Math.max(32, Math.min(pixelCount, Math.round(pixelCount * (0.7 + 0.3 * detail))));
+    const desired = Math.max(32, Math.min(px, Math.round(px * (0.7 + 0.3 * detail))));
     if (len < desired && len > 1) {
       // 太稀疏：做線性插值至 desired
       const target = desired;
@@ -109,8 +115,8 @@ function draw(params){
           ctx.fillStyle = 'rgba(21,101,192,0.85)';
           const radius = Math.max(1.5, Math.min(5, (width/320) * (0.8 + 0.6*detail)));
           const rawLen = origForDots.length;
-          const pixelCount = width;
-          const stride = rawLen > pixelCount ? Math.ceil(rawLen / (pixelCount * (0.8 + 0.6*detail))) : 1; // zoom 越大 stride 越小
+          const px = width;
+          const stride = rawLen > px ? Math.ceil(rawLen / (px * (0.8 + 0.6*detail))) : 1; // zoom 越大 stride 越小
           for (let i=0;i<rawLen;i+=stride){
             const s = Math.max(-1, Math.min(1, origForDots[i]));
             const x = (i/(rawLen-1))*width;
@@ -170,8 +176,8 @@ function draw(params){
           ctx.fillStyle='rgba(21,101,192,0.85)';
           const radius = Math.max(1.5, Math.min(5, (height/320) * (0.8 + 0.6*detail)));
           const rawLen = origForDots.length;
-          const pixelCount = height;
-          const stride = rawLen > pixelCount ? Math.ceil(rawLen / (pixelCount * (0.8 + 0.6*detail))) : 1;
+          const px = height;
+          const stride = rawLen > px ? Math.ceil(rawLen / (px * (0.8 + 0.6*detail))) : 1;
           for (let i=0;i<rawLen;i+=stride){
             const s = Math.max(-1, Math.min(1, origForDots[i]));
             const y = (i/(rawLen-1))*height;

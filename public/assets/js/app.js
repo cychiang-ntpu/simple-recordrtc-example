@@ -1738,6 +1738,10 @@ AccumulatedWaveform.prototype.draw = function() {
             this.zoomFactor = Math.max(1, this.sampleCount || 1);
         }
         if (!isFinite(vis) || vis < 1) vis = 1;
+        // 動態細緻度所需資訊：可視原始樣本數與 DPR
+        var effDec = Math.max(1, this.decimationFactor || 1);
+        var visibleRaw = this.rawZoomMode ? Math.max(1, Math.floor(this.rawVisibleRaw || 1)) : Math.max(1, Math.floor(vis * effDec));
+        var dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
         var msg = {
             type: 'draw',
             zoomFactor: this.zoomFactor,
@@ -1745,7 +1749,10 @@ AccumulatedWaveform.prototype.draw = function() {
             verticalMode: !!isVertical,
             showClipMarks: !!showClipMarks,
             visibleSamples: vis,
-            playbackPosition: this.playbackPosition
+            playbackPosition: this.playbackPosition,
+            // 動態細緻度參數
+            visibleRaw: visibleRaw,
+            dpr: dpr
         };
         // 在最高倍放大時，若可使用 Worklet 的原始 PCM，附帶該視窗的原始樣本供高解析度描繪
         try {
