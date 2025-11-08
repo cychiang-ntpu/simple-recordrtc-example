@@ -1975,6 +1975,8 @@ AccumulatedWaveform.prototype.draw = function() {
             showClipMarks: !!showClipMarks,
             visibleSamples: vis,
             playbackPosition: this.playbackPosition,
+            selectionStart: selectionStart,
+            selectionEnd: selectionEnd,
             // 動態細緻度參數
             visibleRaw: visibleRaw,
             dpr: dpr,

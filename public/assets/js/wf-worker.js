@@ -232,6 +232,157 @@ function draw(params){
   }
   ctx.stroke();
 
+  // 繪製選取區域（若有）
+  const selStart = params.selectionStart;
+  const selEnd = params.selectionEnd;
+  if (typeof selStart === 'number' && typeof selEnd === 'number' && selStart !== selEnd) {
+    const ss = Math.min(selStart, selEnd);
+    const se = Math.max(selStart, selEnd);
+    if (se >= start && ss <= end) {
+      const visStart = Math.max(ss, start);
+      const visEnd = Math.min(se, end);
+      ctx.save();
+      ctx.fillStyle = 'rgba(100, 149, 237, 0.2)';
+      if (!verticalMode) {
+        const x1 = ((visStart - start) / visibleSamples) * width;
+        const x2 = ((visEnd - start) / visibleSamples) * width;
+        ctx.fillRect(x1, 0, x2 - x1, height);
+      } else {
+        const y1 = ((visStart - start) / visibleSamples) * height;
+        const y2 = ((visEnd - start) / visibleSamples) * height;
+        ctx.fillRect(0, y1, width, y2 - y1);
+      }
+      ctx.restore();
+    }
+  }
+
+  // 繪製播放位置指示器
+  const pb = params.playbackPosition;
+  const totalSamples = sampleMin.length;
+  if (typeof pb === 'number' && pb >= 0 && pb <= totalSamples) {
+    if (pb >= start && pb <= end) {
+      ctx.save();
+      if (!verticalMode) {
+        // 水平模式：垂直紅線
+        const playbackX = ((pb - start) / visibleSamples) * width;
+        ctx.strokeStyle = '#FF0000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(playbackX, 0);
+        ctx.lineTo(playbackX, height);
+        ctx.stroke();
+        
+        // 上下三角形指示器
+        ctx.fillStyle = '#FF0000';
+        ctx.beginPath();
+        ctx.moveTo(playbackX, 0);
+        ctx.lineTo(playbackX - 6, 10);
+        ctx.lineTo(playbackX + 6, 10);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.beginPath();
+        ctx.moveTo(playbackX, height);
+        ctx.lineTo(playbackX - 6, height - 10);
+        ctx.lineTo(playbackX + 6, height - 10);
+        ctx.closePath();
+        ctx.fill();
+        
+        // 時間浮標
+        try {
+          const effRate = sourceSampleRate / Math.max(1, decimationFactor);
+          if (effRate > 0) {
+            const absSeconds = pb / effRate;
+            const labelTxt = absSeconds.toFixed(absSeconds >= 10 ? 2 : 3) + 's';
+            const padX = 6, padY = 3;
+            ctx.font = '11px -apple-system,Segoe UI,sans-serif';
+            const textW = ctx.measureText(labelTxt).width;
+            const boxW = textW + padX * 2;
+            const boxH = 16;
+            const boxX = Math.min(Math.max(playbackX - boxW / 2, 2), width - boxW - 2);
+            const boxY = 2;
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            if (ctx.roundRect) {
+              ctx.roundRect(boxX, boxY, boxW, boxH, 4);
+            } else {
+              ctx.rect(boxX, boxY, boxW, boxH);
+            }
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.fillStyle = '#c00';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(labelTxt, boxX + boxW / 2, boxY + boxH / 2);
+          }
+        } catch(e) {}
+      } else {
+        // 垂直模式：水平紅線
+        const playbackY = ((pb - start) / visibleSamples) * height;
+        ctx.strokeStyle = '#FF0000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, playbackY);
+        ctx.lineTo(width, playbackY);
+        ctx.stroke();
+        
+        // 左右三角形指示器
+        ctx.fillStyle = '#FF0000';
+        ctx.beginPath();
+        ctx.moveTo(0, playbackY);
+        ctx.lineTo(10, playbackY - 6);
+        ctx.lineTo(10, playbackY + 6);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.beginPath();
+        ctx.moveTo(width, playbackY);
+        ctx.lineTo(width - 10, playbackY - 6);
+        ctx.lineTo(width - 10, playbackY + 6);
+        ctx.closePath();
+        ctx.fill();
+        
+        // 時間浮標（右側）
+        try {
+          const effRateV = sourceSampleRate / Math.max(1, decimationFactor);
+          if (effRateV > 0) {
+            const absSecV = pb / effRateV;
+            const labelTxtV = absSecV.toFixed(absSecV >= 10 ? 2 : 3) + 's';
+            ctx.font = '11px -apple-system,Segoe UI,sans-serif';
+            const tW = ctx.measureText(labelTxtV).width;
+            const padXv = 6, padYv = 3;
+            const boxWv = tW + padXv * 2;
+            const boxHv = 16;
+            const boxXv = width - boxWv - 2;
+            const boxYv = Math.min(Math.max(playbackY - boxHv / 2, 2), height - boxHv - 2);
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            if (ctx.roundRect) {
+              ctx.roundRect(boxXv, boxYv, boxWv, boxHv, 4);
+            } else {
+              ctx.rect(boxXv, boxYv, boxWv, boxHv);
+            }
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.fillStyle = '#c00';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(labelTxtV, boxXv + boxWv / 2, boxYv + boxHv / 2);
+          }
+        } catch(e) {}
+      }
+      ctx.restore();
+    }
+  }
+
   // 回報細緻度供主執行緒顯示
   try { self.postMessage({ type: 'detailUpdate', detail, density: densityR }); } catch(e){}
 
