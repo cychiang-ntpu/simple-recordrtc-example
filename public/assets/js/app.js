@@ -2757,10 +2757,22 @@ function bindOverviewWaveformInteractions(canvas) {
                 var clickRatio = isVertical ? (clickY / rect.height) : (clickX / rect.width);
                 var targetSample = Math.floor(clickRatio * accumulatedWaveform.sampleCount);
                 var visibleSamples = accumulatedWaveform.getVisibleSamples();
+                // 先建立 overview 預設選取：0.2 秒
+                var effRateO = (accumulatedWaveform.sourceSampleRate || 48000) / Math.max(1, accumulatedWaveform.decimationFactor || 1);
+                var minSamplesO = Math.max(1, Math.ceil(0.2 * effRateO));
+                var half = Math.floor(minSamplesO / 2);
+                var startSel = Math.max(0, targetSample - half);
+                if (startSel + minSamplesO > accumulatedWaveform.sampleCount) {
+                    startSel = Math.max(0, accumulatedWaveform.sampleCount - minSamplesO);
+                }
+                var endSel = Math.min(accumulatedWaveform.sampleCount - 1, startSel + minSamplesO);
+                selectionStart = startSel;
+                selectionEnd = endSel;
                 accumulatedWaveform.viewStart = Math.floor(targetSample - visibleSamples / 2);
                 accumulatedWaveform.isAutoScroll = false;
                 accumulatedWaveform._enforceViewBounds();
                 accumulatedWaveform.draw();
+                updatePlaybackButtonsState();
                 
                 // 更新拖動起始位置
                 dragStartX = clickX;
