@@ -108,6 +108,11 @@ details.adv-section[open] > summary { border-bottom: 1px solid var(--color-borde
     .mini-level { width: 120px; }
 }
 
+/* 迷你音量條在波形容器中的定位與跨欄樣式 */
+#waveform-wrapper .mini-level { width: 100%; max-width: none; }
+#waveform-wrapper.mode-vertical .mini-level-row { grid-column: 1 / -1; }
+#waveform-wrapper.mode-vertical .mini-level-row .mini-level { width: 100%; }
+
 /* 深色主題（以 data-theme="dark" 切換） */
 [data-theme="dark"] {
     --color-bg: #0f172a;

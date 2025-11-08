@@ -57,42 +57,59 @@ function applyDisplayMode(){
     var liveCanvas = document.getElementById('waveform');
     var vuCanvas = document.getElementById('vu-meter');
 
-    if(orientationManager.isVertical()){
-        // 垂直模式：只需要 overview + accumulated；live 隱藏（CSS 已 display:none）
-        var dpr = window.devicePixelRatio || 1;
-        var targetH = Math.round(window.innerHeight * 0.80); // 80vh 高度
-        [overviewCanvas, accumCanvas].forEach(function(c){
-            if(!c) return;
-            var cssW = c.clientWidth || 240;
-            c.width = Math.round(cssW * dpr);
-            c.height = Math.round(targetH * dpr);
-            c.style.height = '100%';
-        });
-        // 若存在 liveWaveform，暫停其繪製循環（節省資源）
-        if (liveWaveform && typeof liveWaveform.stop === 'function') {
-            try { liveWaveform.stop(); } catch(e){}
+    function doResizePass(){
+        if(orientationManager.isVertical()){
+            var dpr = window.devicePixelRatio || 1;
+            var targetH = Math.round(window.innerHeight * 0.80); // 80vh 高度
+            [overviewCanvas, accumCanvas].forEach(function(c){
+                if(!c) return;
+                var cssW = c.clientWidth || 240; // 需在已套用 grid 後再量測
+                c.width = Math.round(cssW * dpr);
+                c.height = Math.round(targetH * dpr);
+                c.style.height = '100%';
+            });
+            if (liveWaveform && typeof liveWaveform.stop === 'function') {
+                try { liveWaveform.stop(); } catch(e){}
+            }
+        } else {
+            if(overviewCanvas){ overviewCanvas.width = 750; overviewCanvas.height = 90; }
+            if(accumCanvas){ accumCanvas.width = 750; accumCanvas.height = 150; }
+            if(liveWaveform && typeof liveWaveform.stop === 'function') {
+                try { liveWaveform.stop(); } catch(e){}
+            }
         }
-    } else {
-        // 新水平模式：隱藏 live，同時交換 overview/accumulated 顯示順序（CSS 控制）
-        // 仍使用原寬高設定於 overview 與 accumulated；live 不再顯示也不需重繪
-        if(overviewCanvas){ overviewCanvas.width = 750; overviewCanvas.height = 90; }
-        if(accumCanvas){ accumCanvas.width = 750; accumCanvas.height = 150; }
-        if(liveWaveform && typeof liveWaveform.stop === 'function') {
-            try { liveWaveform.stop(); } catch(e){}
-        }
+
+        // 同步 AccumulatedWaveform / OverviewWaveform 內部尺寸與 Worker 畫布
+        try {
+            if (accumulatedWaveform) {
+                if (accumCanvas) {
+                    accumulatedWaveform.width = accumCanvas.width;
+                    accumulatedWaveform.height = accumCanvas.height;
+                }
+                // 若使用 worker，通知其調整 offscreen 尺寸
+                if (accumulatedWaveform._useWorker && accumulatedWaveform._worker && accumCanvas) {
+                    accumulatedWaveform._worker.postMessage({
+                        type: 'resizeCanvas',
+                        width: accumCanvas.width,
+                        height: accumCanvas.height
+                    });
+                }
+                accumulatedWaveform.draw();
+            }
+            if (overviewWaveform && overviewCanvas) {
+                overviewWaveform.width = overviewCanvas.width;
+                overviewWaveform.height = overviewCanvas.height;
+                overviewWaveform.draw();
+            }
+        } catch(e){}
     }
 
+    // 第一輪：先嘗試立即調整；為避免剛切換 class 尚未完成排版，再排一個 rAF 二次調整
+    doResizePass();
+    requestAnimationFrame(doResizePass);
+
     // 更新各 waveform 物件內部寬高參考並重繪
-    if(accumulatedWaveform){
-        accumulatedWaveform.width = accumCanvas.width;
-        accumulatedWaveform.height = accumCanvas.height;
-        accumulatedWaveform.draw();
-    }
-    if(overviewWaveform){
-        overviewWaveform.width = overviewCanvas.width;
-        overviewWaveform.height = overviewCanvas.height;
-        overviewWaveform.draw();
-    }
+    // （邏輯已併入 doResizePass）
     if(liveWaveform){
         // 任何模式均不重繪（水平模式新需求亦隱藏 live）
     }
@@ -120,6 +137,12 @@ function applyDisplayMode(){
         var body = document.body;
         if (orientationManager.isVertical()) body.classList.add('is-vertical');
         else body.classList.remove('is-vertical');
+    } catch(e){}
+
+    // 重新定位並同步迷你音量條尺寸
+    try {
+        placeMiniLevel();
+        syncMiniLevelWidth();
     } catch(e){}
 }
 
@@ -160,6 +183,8 @@ window.addEventListener('resize', function(){
         orientationManager.setMode(targetMode);
         showToast('自動切換為 ' + (targetMode === 'vertical' ? '垂直模式' : '水平模式'));
     }
+    // 視窗尺寸改變時，同步迷你音量條寬度
+    try { syncMiniLevelWidth(); } catch(e){}
 });
 window.addEventListener('orientationchange', function(){
     // orientationchange 在部分桌面環境不觸發；行動裝置補強
@@ -171,6 +196,7 @@ window.addEventListener('orientationchange', function(){
         orientationManager.setMode(targetMode);
         showToast('自動切換為 ' + (targetMode === 'vertical' ? '垂直模式' : '水平模式'));
     }
+    try { syncMiniLevelWidth(); } catch(e){}
 });
 
 // 快速按鈕行為
@@ -213,6 +239,54 @@ if (displayModeRadios && displayModeRadios.length) {
         }
     }
 })();
+
+// 將迷你音量條移動到波形容器並根據模式擺放
+function placeMiniLevel(){
+    var mini = document.querySelector('.mini-level');
+    var wrapper = document.getElementById('waveform-wrapper');
+    if (!mini || !wrapper) return;
+
+    // 清除舊的限制以便同步寬度
+    try {
+        mini.style.maxWidth = '';
+        mini.style.width = '';
+        mini.style.margin = '6px auto';
+    } catch(e){}
+
+    // 如已有 row 容器，先移除
+    var oldRow = document.getElementById('mini-level-row');
+    if (oldRow && oldRow.parentElement === wrapper) {
+        try { wrapper.removeChild(oldRow); } catch(e){}
+    }
+
+    if (orientationManager && orientationManager.isVertical && orientationManager.isVertical()) {
+        // 垂直模式：置於兩欄下方，佔滿欄位寬度
+        var row = document.createElement('div');
+        row.id = 'mini-level-row';
+        row.className = 'mini-level-row';
+        row.appendChild(mini);
+        wrapper.appendChild(row);
+    } else {
+        // 水平模式：置於最上方（在累積/總覽之前）
+        if (wrapper.firstChild !== mini) {
+            wrapper.insertBefore(mini, wrapper.firstChild);
+        }
+    }
+}
+
+// 同步迷你音量條寬度為累積波形的可見寬度
+function syncMiniLevelWidth(){
+    var mini = document.querySelector('.mini-level');
+    if (!mini) return;
+    var ref = document.getElementById('accumulated-waveform') || document.getElementById('overview-waveform');
+    if (!ref) return;
+    // 讀取目前 CSS 寬度（含 RWD）
+    var w = ref.clientWidth || 0;
+    if (w > 0) {
+        mini.style.width = w + 'px';
+        mini.style.margin = '6px auto';
+    }
+}
 
 // 調整：在播放暫停/停止後若仍有 analyser 需持續刷新 VU（避免 playback 後停住）
 function ensureVUMeterRunning(){
@@ -351,7 +425,8 @@ function updateMiniLevelBar(rmsDb, peakDb){
         if (!isFinite(rmsDb)) rmsDb = minDb;
         var norm = (rmsDb - minDb) / (maxDb - minDb);
         if (norm < 0) norm = 0; if (norm > 1) norm = 1;
-        bar.style.width = (norm * 100).toFixed(1) + '%';
+        var pct = Math.max(norm * 100, 2); // 設定 2% 的最小可見寬度
+        bar.style.width = pct.toFixed(1) + '%';
         var tip = 'RMS ' + (rmsDb <= minDb ? '-∞' : rmsDb.toFixed(1)) + ' dBFS';
         if (isFinite(peakDb)) tip += ' | Peak ' + (peakDb <= minDb ? '-∞' : peakDb.toFixed(1)) + ' dBFS';
         bar.title = tip;
@@ -585,6 +660,8 @@ document.addEventListener('DOMContentLoaded', function(){
     gatherAndRenderSpecs();
     applyTheme();
     applyOverviewVisibility();
+    // 安置迷你音量條並同步寬度
+    try { placeMiniLevel(); syncMiniLevelWidth(); } catch(e){}
     // 嘗試列出麥克風
     populateMicDevices();
     // 列出輸出裝置

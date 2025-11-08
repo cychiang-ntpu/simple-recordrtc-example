@@ -362,5 +362,15 @@ self.onmessage = function(e){
     case 'reset':
       sampleMin = []; sampleMax = []; clearCanvas(); clearOverview();
       break;
+    case 'resizeCanvas':
+      try {
+        if (offscreen) {
+          offscreen.width = (msg.width|0);
+          offscreen.height = (msg.height|0);
+          width = offscreen.width; height = offscreen.height;
+          clearCanvas();
+        }
+      } catch(e) {}
+      break;
   }
 };
