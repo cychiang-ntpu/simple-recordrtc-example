@@ -2380,6 +2380,24 @@ function bindAccumulatedWaveformInteractions(canvas) {
             } else if (resizeEdge === 'right' || resizeEdge === 'bottom') {
                 selectionEnd = newSample;
             }
+
+            // 最小選取長度：0.2 秒
+            if (selectionStart !== null && selectionEnd !== null && selectionStart !== selectionEnd) {
+                var effRateR = (accumulatedWaveform.sourceSampleRate || 48000) / Math.max(1, accumulatedWaveform.decimationFactor || 1);
+                var minSamplesR = Math.ceil(0.2 * effRateR);
+                var sR = Math.min(selectionStart, selectionEnd);
+                var eR = Math.max(selectionStart, selectionEnd);
+                if ((eR - sR) < minSamplesR) {
+                    if (resizeEdge === 'left' || resizeEdge === 'top') {
+                        // 正在推左/上邊緣，維持右/下固定，延長到最小
+                        sR = Math.max(0, eR - minSamplesR);
+                        selectionStart = sR;
+                    } else {
+                        eR = Math.min(accumulatedWaveform.sampleCount - 1, sR + minSamplesR);
+                        selectionEnd = eR;
+                    }
+                }
+            }
             
             accumulatedWaveform.draw();
             
@@ -2394,7 +2412,24 @@ function bindAccumulatedWaveformInteractions(canvas) {
             if (selectionEnd >= accumulatedWaveform.sampleCount) {
                 selectionEnd = accumulatedWaveform.sampleCount - 1;
             }
-            
+
+            // 最小選取長度：0.2 秒（即時）
+            if (selectionStart !== null && selectionEnd !== null && selectionStart !== selectionEnd) {
+                var effRate = (accumulatedWaveform.sourceSampleRate || 48000) / Math.max(1, accumulatedWaveform.decimationFactor || 1);
+                var minSamples = Math.ceil(0.2 * effRate);
+                var s = Math.min(selectionStart, selectionEnd);
+                var e = Math.max(selectionStart, selectionEnd);
+                if ((e - s) < minSamples) {
+                    if (selectionEnd > selectionStart) {
+                        // 往右/下拖曳，延長 end
+                        selectionEnd = Math.min(accumulatedWaveform.sampleCount - 1, selectionStart + minSamples);
+                    } else {
+                        // 往左/上拖曳，延長 start
+                        selectionStart = Math.max(0, selectionEnd - minSamples);
+                    }
+                }
+            }
+
             accumulatedWaveform.draw();
             
         } else if (isDragging && !isLongPress) {
@@ -2434,6 +2469,27 @@ function bindAccumulatedWaveformInteractions(canvas) {
             }
         }
         activePointerId = null;
+
+        // 最終校正：若選取存在且長度 < 0.2 秒，擴張到最小長度
+        if (accumulatedWaveform && selectionStart !== null && selectionEnd !== null) {
+            var s0 = Math.min(selectionStart, selectionEnd);
+            var e0 = Math.max(selectionStart, selectionEnd);
+            var effRateF = (accumulatedWaveform.sourceSampleRate || 48000) / Math.max(1, accumulatedWaveform.decimationFactor || 1);
+            var minSamplesF = Math.ceil(0.2 * effRateF);
+            if ((e0 - s0) < minSamplesF) {
+                // 盡量向右/下延長；若到邊界，則向左/上補足
+                var targetEnd = Math.min(accumulatedWaveform.sampleCount - 1, s0 + minSamplesF);
+                var needed = minSamplesF - (e0 - s0);
+                if (targetEnd > e0) {
+                    e0 = targetEnd;
+                } else if (s0 > 0) {
+                    s0 = Math.max(0, e0 - minSamplesF);
+                }
+                selectionStart = s0;
+                selectionEnd = e0;
+                accumulatedWaveform.draw();
+            }
+        }
 
         // 選取狀態可能已變更，更新按鈕狀態
         updatePlaybackButtonsState();
