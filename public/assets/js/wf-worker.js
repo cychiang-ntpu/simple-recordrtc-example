@@ -52,6 +52,7 @@ function draw(params){
   const centerX = width/2;
   const samplesPerPixel = (end-start)/(verticalMode?height:width);
   const dpr = (typeof params.dpr === 'number' && params.dpr > 0) ? params.dpr : 1;
+  const dynEnabled = (params.dynamicDetailEnabled !== false);
   ctx.strokeStyle = '#1E88E5';
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -60,11 +61,19 @@ function draw(params){
   // 動態細緻度：以可視原始樣本密度決定
   const pixelCount = verticalMode ? height : width;
   const visibleRawFromMsg = (typeof params.visibleRaw === 'number' && params.visibleRaw > 0) ? params.visibleRaw : (visibleSamples * Math.max(1, decimationFactor));
-  const densityR = (pixelCount > 0) ? (visibleRawFromMsg / (pixelCount * dpr)) : 0; // 每像素幾個原始樣本
-  // 細緻度權重（0~1）：r 越小越接近 1（更細緻）
-  const detail = Math.max(0, Math.min(1, 1 / (1 + densityR)));
-  // 高解析線描條件：有 rawPcm 且密度不高（<= ~1.5 個樣本/像素）或傳統條件
-  const highResMode = !!highResPcm && (densityR <= 1.5 || visibleSamples <= 4);
+  let densityR = (pixelCount > 0) ? (visibleRawFromMsg / (pixelCount * dpr)) : 0; // 每像素幾個原始樣本
+  let detail;
+  let highResMode;
+  if (dynEnabled) {
+    // 動態模式：以密度決定
+    detail = Math.max(0, Math.min(1, 1 / (1 + densityR)));
+    highResMode = !!highResPcm && (densityR <= 1.5 || visibleSamples <= 4);
+  } else {
+    // 傳統模式：維持舊邏輯
+    densityR = NaN;
+    detail = Math.max(0, Math.min(1, 4 / Math.max(1, visibleSamples)));
+    highResMode = !!highResPcm && (visibleSamples <= 4);
+  }
   // 自動密度調整：用於曲線（線段），圓點永遠使用原始樣本列（不插值）
   const origForDots = highResPcm;
   let pcmForDraw = highResPcm;
@@ -222,6 +231,9 @@ function draw(params){
     }
   }
   ctx.stroke();
+
+  // 回報細緻度供主執行緒顯示
+  try { self.postMessage({ type: 'detailUpdate', detail, density: densityR }); } catch(e){}
 
   // Also render overview if provided
   if (overviewCtx) {

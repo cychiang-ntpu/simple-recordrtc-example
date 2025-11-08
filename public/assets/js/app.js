@@ -291,6 +291,7 @@ var themePref = localStorage.getItem('theme') || 'light'; // 主題偏好
 var autoGainProtect = (localStorage.getItem('autoGainProtect') !== 'false'); // 自動降增益保護（預設開啟）
 var showClipMarks = (localStorage.getItem('showClipMarks') !== 'false'); // 顯示削波標記（預設開啟）
 var rawZoomPref = (localStorage.getItem('rawZoomMode') === 'true'); // 以原始樣本縮放（預設關閉）
+var dynamicDetailPref = (localStorage.getItem('dynamicDetailEnabled') !== 'false'); // 動態細緻度（預設開啟）
 // 測試音功能已移除
 // 規格面板更新相關
 var lastSpecs = {}; // 保存最近一次顯示的規格
@@ -389,6 +390,7 @@ function gatherAndRenderSpecs() {
     var decEl = document.getElementById('spec-decimation');
     var dropEl = document.getElementById('spec-dropout');
     var visRawEl = document.getElementById('spec-visible-raw');
+    var detailEl = document.getElementById('spec-detail');
     if (!envEl) return; // 若面板不存在則略過
 
     var specs = {};
@@ -547,6 +549,18 @@ function gatherAndRenderSpecs() {
         }
     } catch(e){ specs.visibleRaw = '(錯誤)'; }
 
+    // 動態細緻度（由 worker 回報）
+    try {
+        if (accumulatedWaveform && typeof accumulatedWaveform.lastDetail === 'number') {
+            var dens = (typeof accumulatedWaveform.lastDensity === 'number') ? accumulatedWaveform.lastDensity : NaN;
+            var txt = 'detail=' + accumulatedWaveform.lastDetail.toFixed(2);
+            if (isFinite(dens)) txt += ', density=' + dens.toFixed(2) + ' sppx';
+            specs.detail = txt;
+        } else {
+            specs.detail = (typeof dynamicDetailPref !== 'undefined' && dynamicDetailPref) ? '(尚無資料)' : '(已停用)';
+        }
+    } catch(e){ specs.detail = '(錯誤)'; }
+
     function updateEl(el,key){
         if (!el) return;
         var val = specs[key];
@@ -563,6 +577,7 @@ function gatherAndRenderSpecs() {
     updateEl(decEl,'decimation');
     updateEl(dropEl,'dropout');
     updateEl(visRawEl,'visibleRaw');
+    updateEl(detailEl,'detail');
 }
 
 // 啟動時先渲染一次基本資訊
@@ -673,6 +688,17 @@ document.addEventListener('DOMContentLoaded', function(){
             rawZoomPref = !!rawZoomToggle.checked;
             localStorage.setItem('rawZoomMode', String(rawZoomPref));
             if (accumulatedWaveform) { try { accumulatedWaveform.setRawZoomMode(rawZoomPref); } catch(e){} }
+        });
+    }
+
+    // 動態細緻度切換
+    var dynDetailToggle = document.getElementById('toggle-dynamic-detail');
+    if (dynDetailToggle) {
+        try { dynDetailToggle.checked = !!dynamicDetailPref; } catch(e){}
+        dynDetailToggle.addEventListener('change', function(){
+            dynamicDetailPref = !!dynDetailToggle.checked;
+            localStorage.setItem('dynamicDetailEnabled', String(dynamicDetailPref));
+            if (accumulatedWaveform) { try { accumulatedWaveform.draw(); } catch(e){} }
         });
     }
 
@@ -1576,6 +1602,18 @@ function AccumulatedWaveform(canvas) {
                 sourceSampleRate: this.sourceSampleRate,
                 decimationFactor: this.decimationFactor
             }, [off]);
+            // 監聽 worker 回報的細緻度
+            var self = this;
+            this._worker.onmessage = function(ev){
+                var msg = ev.data;
+                if (!msg) return;
+                if (msg.type === 'detailUpdate') {
+                    self.lastDetail = msg.detail;
+                    self.lastDensity = msg.density;
+                    // 若規格面板存在，更新顯示
+                    try { gatherAndRenderSpecs(); } catch(e){}
+                }
+            };
         }
     } catch(e) { console.warn('OffscreenCanvas/Worker 初始化失敗，回退主執行緒繪圖', e); }
 }
@@ -1752,7 +1790,8 @@ AccumulatedWaveform.prototype.draw = function() {
             playbackPosition: this.playbackPosition,
             // 動態細緻度參數
             visibleRaw: visibleRaw,
-            dpr: dpr
+            dpr: dpr,
+            dynamicDetailEnabled: !!dynamicDetailPref
         };
         // 在最高倍放大時，若可使用 Worklet 的原始 PCM，附帶該視窗的原始樣本供高解析度描繪
         try {
