@@ -234,6 +234,48 @@ var preGainNode = null;      // 前級增益節點（AGC 關閉時可放大）
 var mediaDest = null;        // MediaStreamDestination（供 RecordRTC 使用的處理後串流）
 var micGainUserFactor = 1.0; // 使用者設定的前級增益倍率（預設 1.0x）
 var defaultWindowSeconds = parseFloat(localStorage.getItem('defaultWindowSeconds') || '1.0'); // 使用者設定的預設視窗秒數
+// AudioWorklet PCM 收集
+var workletSupported = false;
+var workletLoaded = false;
+var pcmCollectorNode = null; // AudioWorkletNode
+var pcmChunks = [];          // 收到的 Float32Array 片段
+var pcmTotalSamples = 0;     // 累積樣本數（單聲道）
+var usingWorklet = false;    // 目前是否使用 Worklet 錄製
+// 掉樣估計：以牆鐘時間推估期望樣本數
+var recordWallStartMs = 0;
+var recordWallStopMs = 0;
+// 提供視覺化高倍放大時取原始樣本的輔助函式
+function getPcmWindow(start, count){
+    if (!usingWorklet || !pcmChunks.length) return null;
+    if (start < 0) start = 0;
+    var total = pcmTotalSamples;
+    if (start >= total) return new Float32Array(0);
+    var end = Math.min(total, start + count);
+    var out = new Float32Array(end - start);
+    var offset = 0;
+    var passed = 0;
+    for (var i=0;i<pcmChunks.length && passed < end;i++){
+        var chunk = pcmChunks[i];
+        if (!chunk || !chunk.length) continue;
+        var cLen = chunk.length;
+        var cStart = passed;
+        var cEnd = passed + cLen;
+        if (cEnd <= start) {
+            passed = cEnd; continue;
+        }
+        var segStart = Math.max(start, cStart);
+        var segEnd = Math.min(end, cEnd);
+        if (segEnd > segStart) {
+            var localStart = segStart - cStart;
+            var slice = chunk.subarray(localStart, localStart + (segEnd - segStart));
+            out.set(slice, offset);
+            offset += slice.length;
+        }
+        passed = cEnd;
+        if (segEnd >= end) break;
+    }
+    return out;
+}
 
 // 即時/累積波形顯示變數
 var liveWaveform = null;          // 即時波形顯示器實例
@@ -247,6 +289,7 @@ var showOverview = (localStorage.getItem('showOverview') !== 'false'); // Overvi
 var themePref = localStorage.getItem('theme') || 'light'; // 主題偏好
 var autoGainProtect = (localStorage.getItem('autoGainProtect') !== 'false'); // 自動降增益保護（預設開啟）
 var showClipMarks = (localStorage.getItem('showClipMarks') !== 'false'); // 顯示削波標記（預設開啟）
+var rawZoomPref = (localStorage.getItem('rawZoomMode') === 'true'); // 以原始樣本縮放（預設關閉）
 // 測試音功能已移除
 // 規格面板更新相關
 var lastSpecs = {}; // 保存最近一次顯示的規格
@@ -343,6 +386,8 @@ function gatherAndRenderSpecs() {
     var recEl = document.getElementById('spec-recorder');
     var outEl = document.getElementById('spec-output');
     var decEl = document.getElementById('spec-decimation');
+    var dropEl = document.getElementById('spec-dropout');
+    var visRawEl = document.getElementById('spec-visible-raw');
     if (!envEl) return; // 若面板不存在則略過
 
     var specs = {};
@@ -392,7 +437,9 @@ function gatherAndRenderSpecs() {
     }
 
     // RecordRTC/StereoAudioRecorder 規格
-    if (recorder) {
+    if (usingWorklet) {
+        specs.recorder = 'AudioWorklet mono float32 → WAV (samples=' + pcmTotalSamples + ')';
+    } else if (recorder) {
         try {
             var internal = recorder.getInternalRecorder ? recorder.getInternalRecorder() : null;
             if (internal) {
@@ -412,7 +459,7 @@ function gatherAndRenderSpecs() {
         } catch(e) {
             specs.recorder = '取得失敗: ' + e.message;
         }
-    } else {
+    } else if (!usingWorklet) {
         specs.recorder = '未建立';
     }
 
@@ -450,6 +497,55 @@ function gatherAndRenderSpecs() {
         }
     } catch(e){ specs.clipping='(錯誤)'; }
 
+    // 掉樣估計（以牆鐘 vs. 收集之樣本數）
+    try {
+        if (audioContext) {
+            var sr = audioContext.sampleRate || 48000;
+            var tNow = performance.now();
+            var tStart = recordWallStartMs || 0;
+            var tEnd = isCurrentlyRecording ? tNow : (recordWallStopMs || tNow);
+            var elapsedSec = tStart > 0 ? Math.max(0, (tEnd - tStart) / 1000) : 0;
+            var expected = Math.round(sr * elapsedSec);
+            var actual = 0;
+            if (usingWorklet) actual = pcmTotalSamples;
+            else if (accumulatedWaveform && accumulatedWaveform.sampleCount) {
+                actual = Math.round(accumulatedWaveform.sampleCount * Math.max(1, accumulatedWaveform.decimationFactor||1));
+            }
+            var diff = Math.max(0, expected - actual);
+            var pct = expected > 0 ? (diff / expected * 100) : 0;
+            specs.dropout = (expected>0)
+                ? ('expected=' + expected + ', actual=' + actual + ', diff=' + diff + ' (' + pct.toFixed(2) + '%)')
+                : '(尚無資料)';
+        } else {
+            specs.dropout = '(AudioContext 未就緒)';
+        }
+    } catch(e){ specs.dropout = '(錯誤)'; }
+
+    // 可視 Raw 樣本數
+    try {
+        if (accumulatedWaveform && accumulatedWaveform.sampleCount) {
+            var dec = Math.max(1, accumulatedWaveform.decimationFactor || 1);
+            var visDec = accumulatedWaveform.getVisibleSamples();
+            var estRaw = visDec * dec;
+            if (usingWorklet && pcmTotalSamples > 0) {
+                var rawStart;
+                var exact;
+                if (accumulatedWaveform.rawZoomMode) {
+                    rawStart = Math.max(0, Math.floor(accumulatedWaveform.rawViewStart));
+                    exact = Math.max(0, Math.min(Math.floor(accumulatedWaveform.rawVisibleRaw), pcmTotalSamples - rawStart));
+                } else {
+                    rawStart = Math.max(0, Math.floor(accumulatedWaveform.viewStart * dec));
+                    exact = Math.max(0, Math.min(estRaw, pcmTotalSamples - rawStart));
+                }
+                specs.visibleRaw = exact + ' (from ' + rawStart + ')';
+            } else {
+                specs.visibleRaw = '≈ ' + estRaw + ' (est)';
+            }
+        } else {
+            specs.visibleRaw = '(尚無資料)';
+        }
+    } catch(e){ specs.visibleRaw = '(錯誤)'; }
+
     function updateEl(el,key){
         if (!el) return;
         var val = specs[key];
@@ -464,6 +560,8 @@ function gatherAndRenderSpecs() {
     updateEl(recEl,'recorder');
     updateEl(outEl,'output');
     updateEl(decEl,'decimation');
+    updateEl(dropEl,'dropout');
+    updateEl(visRawEl,'visibleRaw');
 }
 
 // 啟動時先渲染一次基本資訊
@@ -565,6 +663,15 @@ document.addEventListener('DOMContentLoaded', function(){
             localStorage.setItem('showClipMarks', String(showClipMarks));
             if (accumulatedWaveform) { try { accumulatedWaveform.draw(); } catch(e){} }
             if (overviewWaveform) { try { overviewWaveform.draw(); } catch(e){} }
+        });
+    }
+    var rawZoomToggle = document.getElementById('toggle-raw-zoom');
+    if (rawZoomToggle) {
+        try { rawZoomToggle.checked = !!rawZoomPref; } catch(e){}
+        rawZoomToggle.addEventListener('change', function(){
+            rawZoomPref = !!rawZoomToggle.checked;
+            localStorage.setItem('rawZoomMode', String(rawZoomPref));
+            if (accumulatedWaveform) { try { accumulatedWaveform.setRawZoomMode(rawZoomPref); } catch(e){} }
         });
     }
 
@@ -945,13 +1052,24 @@ function initializeAudioContext() {
         mediaDest = audioContext.createMediaStreamDestination();
 
         // 將前級增益輸出到 analyser 與 MediaStreamDestination
-        preGainNode.connect(analyser);
-        preGainNode.connect(mediaDest);
+    preGainNode.connect(analyser);
+    preGainNode.connect(mediaDest);
 
         analyserSilencer = audioContext.createGain();
         analyserSilencer.gain.value = 0;
         analyser.connect(analyserSilencer);
         analyserSilencer.connect(audioContext.destination);
+
+        // 嘗試載入 AudioWorklet
+        workletSupported = !!(audioContext.audioWorklet && window.AudioWorkletNode);
+        if (workletSupported) {
+            audioContext.audioWorklet.addModule('assets/js/worklet/pcm-collector.js').then(function(){
+                workletLoaded = true;
+            }).catch(function(err){
+                console.warn('載入 AudioWorklet 模組失敗，將回退到 RecordRTC:', err);
+                workletLoaded = false;
+            });
+        }
     }
     
     // 如果 AudioContext 處於暫停狀態，嘗試恢復並返回 Promise
@@ -1427,18 +1545,51 @@ function AccumulatedWaveform(canvas) {
     this.playbackStartTime = 0;            // 播放開始時間戳記
     this.playbackStartSample = 0;          // 播放開始的樣本位置
 
+    // Raw 視窗縮放模式（以原始樣本為單位）
+    this.rawZoomMode = false;              // 是否使用 raw-sample 視窗座標
+    this.rawViewStart = 0;                 // 原始樣本座標的視窗起點
+    this.rawVisibleRaw = 0;                // 原始樣本座標的視窗長度（raw samples）
+
     this.clear();
     setAccumulatedControlsEnabled(false);
+
+    // OffscreenCanvas + Worker 繪圖（可用時啟用）
+    this._useWorker = false;
+    this._worker = null;
+    this._appendBatchMin = [];
+    this._appendBatchMax = [];
+    this._appendFlushScheduled = false;
+    try {
+        if (canvas.transferControlToOffscreen && window.Worker) {
+            var off = canvas.transferControlToOffscreen();
+            this._worker = new Worker('assets/js/wf-worker.js');
+            this._useWorker = true;
+            var isV = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
+            this._worker.postMessage({
+                type: 'init',
+                canvas: off,
+                width: this.width,
+                height: this.height,
+                verticalMode: !!isV,
+                showClipMarks: !!showClipMarks,
+                sourceSampleRate: this.sourceSampleRate,
+                decimationFactor: this.decimationFactor
+            }, [off]);
+        }
+    } catch(e) { console.warn('OffscreenCanvas/Worker 初始化失敗，回退主執行緒繪圖', e); }
 }
 
 /**
  * 清空畫布並重繪基準線
  */
 AccumulatedWaveform.prototype.clear = function() {
+    if (this._useWorker && this._worker) {
+        this._worker.postMessage({ type: 'reset' });
+        return;
+    }
     this.canvasContext.clearRect(0, 0, this.width, this.height);
     this.canvasContext.fillStyle = '#f0f0f0';
     this.canvasContext.fillRect(0, 0, this.width, this.height);
-
     this.canvasContext.lineWidth = 1;
     this.canvasContext.strokeStyle = '#d0d0d0';
     this.canvasContext.beginPath();
@@ -1473,7 +1624,8 @@ AccumulatedWaveform.prototype.append = function(audioSamples) {
 
     var factor = this.decimationFactor;
     var total = audioSamples.length;
-
+    var appendedMin = [];
+    var appendedMax = [];
     for (var i = 0; i < total; i += factor) {
         var blockMin = 1.0;
         var blockMax = -1.0;
@@ -1508,6 +1660,8 @@ AccumulatedWaveform.prototype.append = function(audioSamples) {
 
         this.sampleMin.push(blockMin);
         this.sampleMax.push(blockMax);
+        appendedMin.push(blockMin);
+        appendedMax.push(blockMax);
         this.sampleCount++;
     }
 
@@ -1521,13 +1675,98 @@ AccumulatedWaveform.prototype.append = function(audioSamples) {
         setAccumulatedControlsEnabled(true);
     }
 
+    if (this._useWorker && this._worker) {
+        // 批次聚合以減少 postMessage 次數
+        this._appendBatchMin.push(appendedMin);
+        this._appendBatchMax.push(appendedMax);
+        if (!this._appendFlushScheduled) {
+            this._appendFlushScheduled = true;
+            var self = this;
+            var flush = function(){ self._flushAppendBatch(); };
+            if (typeof requestAnimationFrame === 'function') requestAnimationFrame(flush);
+            else setTimeout(flush, 32);
+        }
+    }
     this.draw();
+};
+
+AccumulatedWaveform.prototype._flushAppendBatch = function(){
+    if (!this._useWorker || !this._worker) { this._appendFlushScheduled = false; this._appendBatchMin.length=0; this._appendBatchMax.length=0; return; }
+    var batchesMin = this._appendBatchMin.splice(0);
+    var batchesMax = this._appendBatchMax.splice(0);
+    this._appendFlushScheduled = false;
+    var totalLen = 0;
+    for (var i=0;i<batchesMin.length;i++){ totalLen += batchesMin[i].length; }
+    if (totalLen === 0) return;
+    var minBuf = new Float32Array(totalLen);
+    var maxBuf = new Float32Array(totalLen);
+    var off = 0;
+    for (var j=0;j<batchesMin.length;j++){
+        var a = batchesMin[j]; var b = batchesMax[j];
+        if (!a || !b) continue;
+        minBuf.set(a, off);
+        maxBuf.set(b, off);
+        off += a.length;
+    }
+    try {
+        this._worker.postMessage({ type:'append', minBlocks: minBuf, maxBlocks: maxBuf }, [minBuf.buffer, maxBuf.buffer]);
+    } catch(e){
+        this._worker.postMessage({ type:'append', minBlocks: Array.from(minBuf), maxBlocks: Array.from(maxBuf) });
+    }
 };
 
 /**
  * 繪製累積波形
  */
 AccumulatedWaveform.prototype.draw = function() {
+    if (this._useWorker && this._worker) {
+        var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
+        var vis = this.getVisibleSamples();
+        // 若為 raw 模式，同步 decimated 視窗以利 worker 與 overview 指示
+        if (this.rawZoomMode) {
+            var dec = Math.max(1, this.decimationFactor||1);
+            this.viewStart = Math.floor(this.rawViewStart / dec);
+            // 重新計算 zoomFactor 對應目前 dec 視窗
+            var visDec = Math.max(1, Math.round(this.rawVisibleRaw / dec));
+            if (visDec > this.sampleCount) visDec = this.sampleCount;
+            this.zoomFactor = this.sampleCount / visDec;
+            vis = visDec;
+        }
+        var msg = {
+            type: 'draw',
+            zoomFactor: this.zoomFactor,
+            viewStart: this.viewStart,
+            verticalMode: !!isVertical,
+            showClipMarks: !!showClipMarks,
+            visibleSamples: vis,
+            playbackPosition: this.playbackPosition
+        };
+        // 在最高倍放大時，若可使用 Worklet 的原始 PCM，附帶該視窗的原始樣本供高解析度描繪
+        try {
+            if (usingWorklet && pcmTotalSamples > 0 && typeof getPcmWindow === 'function') {
+                var startOrig = this.rawZoomMode ? Math.max(0, Math.floor(this.rawViewStart)) : Math.max(0, Math.floor(this.viewStart * this.decimationFactor));
+                var countOrig = this.rawZoomMode ? Math.max(1, Math.floor(this.rawVisibleRaw)) : Math.max(1, Math.floor(vis * this.decimationFactor));
+                // 控制安全上限（避免一次傳太多樣本）
+                var primaryPixels = isVertical ? this.height : this.width;
+                var maxOrig = Math.max(primaryPixels * 4, 4096);
+                if (countOrig <= maxOrig) {
+                    var raw = getPcmWindow(startOrig, countOrig);
+                    if (raw && raw.length) {
+                        msg.rawPcm = raw;
+                    }
+                }
+            }
+        } catch(e) {}
+        if (msg.rawPcm && msg.rawPcm.buffer) {
+            try { this._worker.postMessage(msg, [msg.rawPcm.buffer]); }
+            catch(_){ this._worker.postMessage(msg); }
+        } else {
+            this._worker.postMessage(msg);
+        }
+        // Overview 已由 Worker 處理（若已初始化 OffscreenCanvas）
+        try { updateVisibleWindowIndicator(); } catch(e){}
+        return;
+    }
     this.clear();
 
     if (!this.sampleCount) {
@@ -1859,21 +2098,19 @@ AccumulatedWaveform.prototype.draw = function() {
  * @returns {number} 可視樣本數
  */
 AccumulatedWaveform.prototype.getVisibleSamples = function() {
-    if (!this.sampleCount) {
-        return 0;
+    if (!this.sampleCount) return 0;
+    // 在 raw 模式下，decimated 視窗寬度由 rawVisibleRaw / decimationFactor 決定
+    if (this.rawZoomMode) {
+        var dec = Math.max(1, this.decimationFactor || 1);
+        var visDec = Math.max(1, Math.round(this.rawVisibleRaw / dec));
+        if (visDec > this.sampleCount) visDec = this.sampleCount;
+        return visDec;
     }
-
     var total = this.sampleCount;
     var minVisible = this._getMinVisibleSamples(total);
     var visible = Math.round(total / this.zoomFactor);
-
-    if (visible < minVisible) {
-        visible = minVisible;
-    }
-    if (visible > total) {
-        visible = total;
-    }
-
+    if (visible < minVisible) visible = minVisible;
+    if (visible > total) visible = total;
     return visible;
 };
 
@@ -1886,66 +2123,48 @@ AccumulatedWaveform.prototype._getMinVisibleSamples = function(total) {
     if (!total) {
         return 0;
     }
-
-    var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
-    var primaryPixels = isVertical ? this.height : this.width;
-
-    var minSpan;
-    if (total <= primaryPixels) {
-        minSpan = Math.max(1, Math.ceil(total / 6));
-    } else {
-        minSpan = Math.max(1, Math.floor(primaryPixels / 2));
-    }
-
-    if (minSpan > total) {
-        minSpan = total;
-    }
-
-    return minSpan;
+    // 放寬最小視窗限制：允許縮放到只剩 1 個（decimated）樣本
+    return 1;
 };
 
 /**
  * 依據目前縮放狀態調整視窗邊界
  */
 AccumulatedWaveform.prototype._enforceViewBounds = function() {
-    if (!this.sampleCount) {
-        this.viewStart = 0;
-        return;
-    }
-
+    if (!this.sampleCount) { this.viewStart = 0; this.rawViewStart = 0; return; }
     var total = this.sampleCount;
     var visible = this.getVisibleSamples();
-
-    if (visible >= total) {
-        this.viewStart = 0;
+    if (this.rawZoomMode) {
+        // raw 邊界：rawViewStart 在 [0, sampleCount*decimationFactor - rawVisibleRaw]
+        var dec = Math.max(1, this.decimationFactor||1);
+        var rawTotal = total * dec;
+        if (this.rawVisibleRaw > rawTotal) this.rawVisibleRaw = rawTotal;
+        if (this.rawViewStart < 0) this.rawViewStart = 0;
+        if (this.rawViewStart + this.rawVisibleRaw > rawTotal) this.rawViewStart = Math.max(0, rawTotal - this.rawVisibleRaw);
+        // 對應 decimated viewStart
+        this.viewStart = Math.floor(this.rawViewStart / dec);
         return;
     }
-
-    if (this.viewStart < 0) {
-        this.viewStart = 0;
-    }
-
-    if (this.viewStart + visible > total) {
-        this.viewStart = total - visible;
-    }
+    if (visible >= total) { this.viewStart = 0; return; }
+    if (this.viewStart < 0) this.viewStart = 0;
+    if (this.viewStart + visible > total) this.viewStart = total - visible;
 };
 
 /**
  * 捲動視圖到最新資料
  */
 AccumulatedWaveform.prototype.scrollToLatest = function() {
-    if (!this.sampleCount) {
-        this.viewStart = 0;
+    if (!this.sampleCount) { this.viewStart = 0; this.rawViewStart = 0; return; }
+    var visible = this.getVisibleSamples();
+    if (this.rawZoomMode) {
+        var dec = Math.max(1, this.decimationFactor||1);
+        var rawTotal = this.sampleCount * dec;
+        var rawVis = this.rawVisibleRaw;
+        if (rawVis >= rawTotal) { this.rawViewStart = 0; this.viewStart = 0; }
+        else { this.rawViewStart = rawTotal - rawVis; this.viewStart = Math.floor(this.rawViewStart / dec); }
         return;
     }
-
-    var visible = this.getVisibleSamples();
-
-    if (visible >= this.sampleCount) {
-        this.viewStart = 0;
-    } else {
-        this.viewStart = this.sampleCount - visible;
-    }
+    if (visible >= this.sampleCount) this.viewStart = 0; else this.viewStart = this.sampleCount - visible;
 };
 
 /**
@@ -1954,46 +2173,45 @@ AccumulatedWaveform.prototype.scrollToLatest = function() {
  * @param {number} [anchorSample] - 錨點樣本索引，用於維持放大中心
  */
 AccumulatedWaveform.prototype.setZoom = function(targetZoom, anchorSample) {
-    if (!this.sampleCount) {
+    if (!this.sampleCount) return;
+    if (this.rawZoomMode) {
+        // 在 raw 模式忽略 decimated zoomFactor，改用 rawVisibleRaw 調整
+        var dec = Math.max(1, this.decimationFactor||1);
+        var totalDec = this.sampleCount; // decimated total
+        var prevVisDec = this.getVisibleSamples();
+        var prevVisRaw = this.rawVisibleRaw;
+        var minVisibleDec = this._getMinVisibleSamples(totalDec);
+        var maxZoomDec = totalDec / minVisibleDec;
+        if (!isFinite(maxZoomDec) || maxZoomDec < 1) maxZoomDec = 1;
+        if (targetZoom < 1) targetZoom = 1; if (targetZoom > maxZoomDec) targetZoom = maxZoomDec;
+        if (targetZoom === this.zoomFactor) return;
+        this.zoomFactor = targetZoom; // 保留語意（但不直接用於計算）
+        var newVisDec = this.getVisibleSamples();
+        var newVisRaw = newVisDec * dec;
+        if (anchorSample == null) anchorSample = this.rawViewStart + prevVisRaw/2;
+        // anchorSample 以 raw 為單位傳入時支援；若 anchorSample 來源是 decimated，轉為 raw
+        if (anchorSample < 0) anchorSample = 0;
+        this.isAutoScroll = false;
+        var rel = prevVisRaw ? (anchorSample - this.rawViewStart)/prevVisRaw : 0.5;
+        if (!isFinite(rel)) rel = 0.5;
+        this.rawViewStart = Math.round(anchorSample - rel * newVisRaw);
+        this.rawVisibleRaw = newVisRaw;
+        this._enforceViewBounds();
+        this.draw();
         return;
     }
-
     var total = this.sampleCount;
     var minVisible = this._getMinVisibleSamples(total);
-    var maxZoom = total / minVisible;
-    if (!isFinite(maxZoom) || maxZoom < 1) {
-        maxZoom = 1;
-    }
-
-    if (targetZoom < 1) {
-        targetZoom = 1;
-    }
-    if (targetZoom > maxZoom) {
-        targetZoom = maxZoom;
-    }
-
-    if (targetZoom === this.zoomFactor) {
-        return;
-    }
-
+    var maxZoom = total / minVisible; if (!isFinite(maxZoom) || maxZoom < 1) maxZoom = 1;
+    if (targetZoom < 1) targetZoom = 1; if (targetZoom > maxZoom) targetZoom = maxZoom;
+    if (targetZoom === this.zoomFactor) return;
     var previousVisible = this.getVisibleSamples();
-    this.zoomFactor = targetZoom;
-    var newVisible = this.getVisibleSamples();
-
-    if (anchorSample === undefined || anchorSample === null) {
-        anchorSample = this.viewStart + previousVisible / 2;
-    }
-
+    this.zoomFactor = targetZoom; var newVisible = this.getVisibleSamples();
+    if (anchorSample == null) anchorSample = this.viewStart + previousVisible/2;
     this.isAutoScroll = false;
-
-    var relative = previousVisible ? (anchorSample - this.viewStart) / previousVisible : 0.5;
-    if (!isFinite(relative)) {
-        relative = 0.5;
-    }
-
-    this.viewStart = Math.round(anchorSample - relative * newVisible);
-    this._enforceViewBounds();
-    this.draw();
+    var relative = previousVisible ? (anchorSample - this.viewStart)/previousVisible : 0.5; if (!isFinite(relative)) relative = 0.5;
+    this.viewStart = Math.round(anchorSample - relative*newVisible);
+    this._enforceViewBounds(); this.draw();
 };
 
 /**
@@ -2002,23 +2220,18 @@ AccumulatedWaveform.prototype.setZoom = function(targetZoom, anchorSample) {
  * @param {number} [anchorRatio] - 錨點相對位置 (0~1) 用於保持焦點
  */
 AccumulatedWaveform.prototype.zoomBySteps = function(stepCount, anchorRatio) {
-    if (!this.sampleCount || !stepCount) {
-        return;
-    }
-
+    if (!this.sampleCount || !stepCount) return;
     var anchorSample = null;
-    if (anchorRatio !== undefined && anchorRatio !== null && this.sampleCount) {
-        if (anchorRatio < 0) {
-            anchorRatio = 0;
-        } else if (anchorRatio > 1) {
-            anchorRatio = 1;
+    if (anchorRatio != null && this.sampleCount) {
+        if (anchorRatio < 0) anchorRatio = 0; else if (anchorRatio > 1) anchorRatio = 1;
+        if (this.rawZoomMode) {
+            var prevRawVis = this.rawVisibleRaw;
+            anchorSample = this.rawViewStart + anchorRatio * prevRawVis; // raw anchor
+        } else {
+            anchorSample = this.viewStart + anchorRatio * this.getVisibleSamples();
         }
-        anchorSample = this.viewStart + anchorRatio * this.getVisibleSamples();
     }
-
-    var zoomBase = 1.5;
-    var targetZoom = this.zoomFactor * Math.pow(zoomBase, stepCount);
-    this.setZoom(targetZoom, anchorSample);
+    var zoomBase = 1.5; var targetZoom = this.zoomFactor * Math.pow(zoomBase, stepCount); this.setZoom(targetZoom, anchorSample);
 };
 
 /**
@@ -2026,15 +2239,17 @@ AccumulatedWaveform.prototype.zoomBySteps = function(stepCount, anchorRatio) {
  * @param {number} sampleDelta - 正值向右，負值向左
  */
 AccumulatedWaveform.prototype.panBySamples = function(sampleDelta) {
-    if (!this.sampleCount || !sampleDelta) {
+    if (!this.sampleCount || !sampleDelta) return;
+    this.isAutoScroll = false;
+    if (this.rawZoomMode) {
+        var dec = Math.max(1, this.decimationFactor||1);
+        this.rawViewStart += sampleDelta * dec;
+        this._panRemainder = 0;
+        this._enforceViewBounds();
+        this.draw();
         return;
     }
-
-    this.isAutoScroll = false;
-    this.viewStart += sampleDelta;
-    this._panRemainder = 0;
-    this._enforceViewBounds();
-    this.draw();
+    this.viewStart += sampleDelta; this._panRemainder = 0; this._enforceViewBounds(); this.draw();
 };
 
 /**
@@ -2042,16 +2257,13 @@ AccumulatedWaveform.prototype.panBySamples = function(sampleDelta) {
  * @param {number} pixelDelta - 以畫素為單位的位移
  */
 AccumulatedWaveform.prototype.panByPixels = function(pixelDelta) {
-    if (!this.sampleCount || !pixelDelta) {
-        return;
-    }
-
+    if (!this.sampleCount || !pixelDelta) return;
     var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
     var primaryPixels = isVertical ? this.height : this.width;
-    var samplesPerPixel = this.getVisibleSamples() / primaryPixels;
-    this._panRemainder += pixelDelta * samplesPerPixel;
+    var visibleDec = this.getVisibleSamples();
+    var samplesPerPixelDec = visibleDec / primaryPixels;
+    this._panRemainder += pixelDelta * samplesPerPixelDec;
     var sampleDelta = Math.trunc(this._panRemainder);
-
     if (sampleDelta !== 0) {
         this._panRemainder -= sampleDelta;
         this.panBySamples(sampleDelta);
@@ -2062,20 +2274,16 @@ AccumulatedWaveform.prototype.panByPixels = function(pixelDelta) {
  * 重設視圖（恢復自動捲動與預設縮放）
  */
 AccumulatedWaveform.prototype.resetView = function() {
-    if (!this.sampleCount) {
-        this.zoomFactor = 1;
-        this.viewStart = 0;
-        this.isAutoScroll = true;
-        this._panRemainder = 0;
-        this.draw();
-        return;
+    if (!this.sampleCount) { this.zoomFactor = 1; this.viewStart = 0; this.rawViewStart = 0; this.isAutoScroll=true; this._panRemainder=0; this.draw(); return; }
+    this.zoomFactor = 1; this._panRemainder=0; this.isAutoScroll=true;
+    if (this.rawZoomMode) {
+        // raw 模式重設到最後（保持語意一致）
+        var dec = Math.max(1,this.decimationFactor||1);
+        this.rawVisibleRaw = this.sampleCount * dec; // 全視窗
+        this.rawViewStart = 0;
+        this._enforceViewBounds();
     }
-
-    this.zoomFactor = 1;
-    this._panRemainder = 0;
-    this.isAutoScroll = true;
-    this.scrollToLatest();
-    this.draw();
+    this.scrollToLatest(); this.draw();
 };
 
 /**
@@ -2114,6 +2322,40 @@ AccumulatedWaveform.prototype._getSamplePair = function(index) {
 AccumulatedWaveform.prototype.setPlaybackPosition = function(sampleIndex) {
     this.playbackPosition = Math.max(0, Math.min(sampleIndex, this.sampleCount));
     this.draw();
+};
+
+// Raw 模式切換
+AccumulatedWaveform.prototype.setRawZoomMode = function(enabled){
+    enabled = !!enabled;
+    if (enabled && !(usingWorklet && pcmTotalSamples > 0)) {
+        // 不具備原始樣本（非 Worklet）時無法啟用
+        enabled = false;
+        try {
+            var tgl = document.getElementById('toggle-raw-zoom');
+            if (tgl) tgl.checked = false;
+        } catch(e){}
+        showToast('Raw 視窗縮放需 Worklet 模式與原始樣本');
+    }
+    if (this.rawZoomMode === enabled) { this.draw(); return; }
+    this.rawZoomMode = enabled;
+    var dec = Math.max(1, this.decimationFactor||1);
+    if (enabled) {
+        // 進入 raw 模式：將目前 decimated 視窗轉換為 raw 視窗
+        var visDec = this.getVisibleSamples();
+        this.rawVisibleRaw = Math.max(1, visDec * dec);
+        this.rawViewStart = Math.max(0, this.viewStart * dec);
+        this._enforceViewBounds();
+    } else {
+        // 離開 raw 模式：根據 raw 視窗回推 decimated zoomFactor/viewStart
+        var visDec2 = Math.max(1, Math.round(this.rawVisibleRaw / dec));
+        if (visDec2 > this.sampleCount) visDec2 = this.sampleCount;
+        this.zoomFactor = this.sampleCount / Math.max(1, visDec2);
+        this.viewStart = Math.floor(this.rawViewStart / dec);
+        this._enforceViewBounds();
+    }
+    this.draw();
+    // 規格重新渲染（可視 raw 樣本）
+    try { gatherAndRenderSpecs(); } catch(e){}
 };
 
 /**
@@ -2181,6 +2423,22 @@ function OverviewWaveform(canvas, accumulatedWaveform) {
     this.width = canvas.width;
     this.height = canvas.height;
     this.accumulatedWaveform = accumulatedWaveform;
+    this._useWorker = false;
+    this._workerRef = null;
+    // 若累積波形已啟用 Worker，則將 Overview Canvas 也移轉至同一個 Worker
+    try {
+        if (accumulatedWaveform && accumulatedWaveform._useWorker && accumulatedWaveform._worker && canvas.transferControlToOffscreen) {
+            var off = canvas.transferControlToOffscreen();
+            accumulatedWaveform._worker.postMessage({
+                type:'initOverview',
+                canvas: off,
+                width: this.width,
+                height: this.height
+            }, [off]);
+            this._useWorker = true;
+            this._workerRef = accumulatedWaveform._worker;
+        }
+    } catch(e){ console.warn('Overview Offscreen 轉移失敗，改用主執行緒繪圖', e); }
     
     this.clear();
 }
@@ -2189,6 +2447,10 @@ function OverviewWaveform(canvas, accumulatedWaveform) {
  * 清空畫布
  */
 OverviewWaveform.prototype.clear = function() {
+    if (this._useWorker && this._workerRef) {
+        // 交由 worker 清空（在下次 draw 時一併處理）
+        return;
+    }
     this.canvasContext.clearRect(0, 0, this.width, this.height);
     this.canvasContext.fillStyle = '#f5f5f5';
     this.canvasContext.fillRect(0, 0, this.width, this.height);
@@ -2199,6 +2461,28 @@ OverviewWaveform.prototype.clear = function() {
  */
 OverviewWaveform.prototype.draw = function() {
     if (!this.accumulatedWaveform) {
+        return;
+    }
+    if (this._useWorker && this._workerRef) {
+        // 若尺寸有變化，通知 worker 調整 Overview 畫布大小
+        try {
+            this._workerRef.postMessage({ type:'resizeOverview', width: this.width, height: this.height });
+        } catch(e){}
+        // 直接要求 worker 以累積波形狀態進行繪製
+        try {
+            var isV = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
+            var acc = this.accumulatedWaveform;
+            var visSamp = acc.getVisibleSamples();
+            this._workerRef.postMessage({
+                type:'draw',
+                zoomFactor: acc.zoomFactor,
+                viewStart: acc.viewStart,
+                verticalMode: !!isV,
+                showClipMarks: !!showClipMarks,
+                visibleSamples: visSamp,
+                playbackPosition: acc.playbackPosition
+            });
+        } catch(e){}
         return;
     }
     
@@ -3580,111 +3864,6 @@ function stopRecordingCallback() {
         button.innerHTML = progress;
     });
 
-    /*---------------------------------------------------------------
-     * 檔案上傳相關函數
-     * 處理檔案上傳到 PHP 後端的邏輯
-     *--------------------------------------------------------------*/
-    
-    var listOfFilesUploaded = []; // 已上傳檔案清單
-
-    /**
-     * 上傳錄音檔案到伺服器
-     * @param {Object} recordRTC - RecordRTC 錄音器實例或 Blob 物件
-     * @param {function} callback - 進度回調函數
-     */
-    function uploadToServer(recordRTC, callback) {
-        // 獲取 Blob 物件（可能直接是 Blob 或從 RecordRTC 提取）
-        var blob = recordRTC instanceof Blob ? recordRTC : recordRTC.blob;
-        var fileType = blob.type.split('/')[0] || 'audio'; // 獲取檔案類型（通常是 'audio'）
-        
-        // 生成唯一檔案名稱
-        var fileName = 'xxx_' + (Math.random() * 1000).toString().replace('.', '');
-        
-        // 根據瀏覽器類型設定檔案副檔名
-        if (fileType === 'audio') {
-            fileName += '.' + (!!navigator.mozGetUserMedia ? 'ogg' : 'wav'); // Firefox 使用 ogg，其他使用 wav
-        } else {
-            fileName += '.webm'; // 視頻檔案使用 webm
-        }
-
-        // 創建 FormData 物件用於檔案上傳
-        var formData = new FormData();
-        formData.append(fileType + '-filename', fileName); // 檔案名稱
-        formData.append(fileType + '-blob', blob);          // 檔案內容
-
-        callback('Uploading ' + fileType + ' recording to server.'); // 通知開始上傳
-
-        // 伺服器端點設定
-        var upload_url = 'save.php';        // 上傳處理 PHP 檔案
-        var upload_directory = 'uploads/';   // 上傳目錄
-
-        // 執行 HTTP 請求上傳檔案
-        makeXMLHttpRequest(upload_url, formData, function(progress) {
-            if (progress !== 'upload-ended') {
-                callback(progress); // 更新上傳進度
-                return;
-            }
-
-            callback('ended', upload_directory + fileName); // 上傳完成
-
-            // 將檔案加入已上傳清單（用於離開頁面時清理）
-            listOfFilesUploaded.push(upload_directory + fileName);
-        });
-    }
-
-    /**
-     * 建立 XMLHttpRequest 請求上傳檔案
-     * @param {string} url - 上傳目標 URL
-     * @param {FormData} data - 要上傳的表單數據
-     * @param {function} callback - 進度回調函數
-     */
-    function makeXMLHttpRequest(url, data, callback) {
-        var request = new XMLHttpRequest(); // 創建 HTTP 請求物件
-        
-        // 請求狀態變化處理
-        request.onreadystatechange = function() {
-            if (request.readyState == 4 && request.status == 200) {
-                callback('upload-ended'); // 上傳完成
-            }
-        };
-
-        // 上傳開始事件
-        request.upload.onloadstart = function() {
-            callback('Upload started...');
-        };
-
-        // 上傳進度事件
-        request.upload.onprogress = function(event) {
-            callback('Upload Progress ' + Math.round(event.loaded / event.total * 100) + "%");
-        };
-
-        // 上傳即將結束事件
-        request.upload.onload = function() {
-            callback('progress-about-to-end');
-        };
-
-        // 上傳完成事件
-        request.upload.onload = function() {
-            callback('progress-ended');
-        };
-
-        // 上傳錯誤處理
-        request.upload.onerror = function(error) {
-            callback('Failed to upload to server');
-            console.error('XMLHttpRequest failed', error);
-        };
-
-        // 上傳中止處理
-        request.upload.onabort = function(error) {
-            callback('Upload aborted.');
-            console.error('XMLHttpRequest aborted', error);
-        };
-
-        // 發送 POST 請求
-        request.open('POST', url);
-        request.send(data);
-    }
-    
     recorder = null; // 清空錄音器引用
 }
 
@@ -3694,6 +3873,51 @@ function stopRecordingCallback() {
  *================================================================*/
 var recorder; // 全域可訪問的錄音器物件
 var isCurrentlyRecording = false; // 追蹤當前錄音狀態
+
+/*=================================================================
+ * 上傳相關 - 全域函式（供 RecordRTC 與 Worklet 共用）
+ *================================================================*/
+var listOfFilesUploaded = [];
+
+function uploadToServer(recordSource, callback) {
+    try {
+        var blob = (recordSource instanceof Blob) ? recordSource : (recordSource && recordSource.blob);
+        if (!blob) { callback && callback('no-blob'); return; }
+        var fileType = blob.type.split('/')[0] || 'audio';
+        var fileName = 'xxx_' + (Math.random() * 1000).toString().replace('.', '');
+        if (fileType === 'audio') { fileName += (!!navigator.mozGetUserMedia ? '.ogg' : '.wav'); } else { fileName += '.webm'; }
+        var formData = new FormData();
+        formData.append(fileType + '-filename', fileName);
+        formData.append(fileType + '-blob', blob);
+        callback && callback('Uploading ' + fileType + ' recording to server.');
+        var upload_url = 'save.php';
+        var upload_directory = 'uploads/';
+        makeXMLHttpRequest(upload_url, formData, function(progress){
+            if (progress !== 'upload-ended') { callback && callback(progress); return; }
+            callback && callback('ended', upload_directory + fileName);
+            listOfFilesUploaded.push(upload_directory + fileName);
+        });
+    } catch(e) {
+        console.error('uploadToServer error', e);
+        callback && callback('upload-error');
+    }
+}
+
+function makeXMLHttpRequest(url, data, callback) {
+    var request = new XMLHttpRequest();
+    request.onreadystatechange = function() {
+        if (request.readyState == 4 && request.status == 200) {
+            callback('upload-ended');
+        }
+    };
+    request.upload.onloadstart = function() { callback('Upload started...'); };
+    request.upload.onprogress = function(e){ if (e && e.total) callback('Upload Progress ' + Math.round(e.loaded/e.total*100) + '%'); };
+    request.upload.onload = function(){ callback('progress-ended'); };
+    request.upload.onerror = function(err){ callback('Failed to upload to server'); console.error('XHR failed', err); };
+    request.upload.onabort = function(err){ callback('Upload aborted.'); console.error('XHR aborted', err); };
+    request.open('POST', url);
+    request.send(data);
+}
 
 /*=================================================================
  * 錄音切換按鈕事件處理
@@ -3827,6 +4051,9 @@ function startRecording() {
     is_ready_to_record = false;     // 設定為非準備狀態
     is_recording = true;            // 設定為錄音中
     is_recorded = false;            // 設定為未完成錄音
+    // 掉樣估時計時起點
+    recordWallStartMs = performance.now();
+    recordWallStopMs = 0;
     
     // 更新按鈕樣式和文字
     toggleButton.classList.add('recording');
@@ -3880,6 +4107,8 @@ function startRecording() {
             accumulatedWaveform = accumulatedCanvas ? new AccumulatedWaveform(accumulatedCanvas) : null;
             if (accumulatedCanvas) {
                 bindAccumulatedWaveformInteractions(accumulatedCanvas);
+                // 初始化 Raw 視窗縮放偏好
+                try { if (typeof accumulatedWaveform.setRawZoomMode === 'function') accumulatedWaveform.setRawZoomMode(rawZoomPref); } catch(e){}
             }
             var overviewCanvas = document.getElementById('overview-waveform');
             overviewWaveform = overviewCanvas && accumulatedWaveform ? new OverviewWaveform(overviewCanvas, accumulatedWaveform) : null;
@@ -3904,55 +4133,99 @@ function startRecording() {
             /*-------------------------------------------------------
              * 初始化 RecordRTC 並開始錄音
              *------------------------------------------------------*/
-            try {
-                // 若已有處理後的 mediaDest，使用其串流進行錄製以套用前級增益
-                var recordStream = (mediaDest && mediaDest.stream) ? mediaDest.stream : microphone;
-                recorder = RecordRTC(recordStream, {
-                    type: 'audio',
-                    mimeType: 'audio/wav',
-                    recorderType: StereoAudioRecorder,
-                    numberOfAudioChannels: 1,
-                    bufferSize: 2048,
-                    timeSlice: 20,
-                    ondataavailable: function(blob) {
-                        appendBlobToAccumulatedWaveform(blob);
-                        // 進行中即時更新規格（顯示 decimation 成長）
-                        gatherAndRenderSpecs();
-                    }
-                });
+            // 若 Worklet 可用，使用 Worklet 直接收集 PCM；否則回退 RecordRTC
+            if (workletSupported && workletLoaded) {
+                usingWorklet = true;
+                pcmChunks = []; pcmTotalSamples = 0;
+                // 建立工作節點
+                try {
+                    pcmCollectorNode = new AudioWorkletNode(audioContext, 'pcm-collector', {
+                        numberOfInputs: 1,
+                        numberOfOutputs: 1,
+                        outputChannelCount: [1]
+                    });
+                    // 連接：preGain -> worklet -> silencer（保持節點活躍）
+                    preGainNode.connect(pcmCollectorNode);
+                    pcmCollectorNode.connect(analyserSilencer);
+                    // 收資料
+                    pcmCollectorNode.port.onmessage = function(ev){
+                        var data = ev.data || {};
+                        if (data.type === 'pcm' && data.buffer && data.length) {
+                            try {
+                                var f32 = new Float32Array(data.buffer, 0, data.length);
+                                // 複製出獨立緩衝避免之後被覆寫
+                                var copy = new Float32Array(f32.length);
+                                copy.set(f32);
+                                pcmChunks.push(copy);
+                                pcmTotalSamples += copy.length;
+                                // 直接將新片段 append 至累積波形
+                                if (accumulatedWaveform) {
+                                    if (!accumulatedWaveform.sourceSampleRate && audioContext) {
+                                        accumulatedWaveform.sourceSampleRate = audioContext.sampleRate;
+                                        var target = accumulatedWaveform.targetSampleRate || 5000;
+                                        accumulatedWaveform.decimationFactor = Math.max(1, Math.floor((audioContext.sampleRate||48000)/target));
+                                    }
+                                    accumulatedWaveform.append(copy);
+                                }
+                            } catch(e) { console.warn('pcm onmessage parse failed', e); }
+                        }
+                    };
+                    // 規格更新
+                    gatherAndRenderSpecs();
+                    setTimeout(gatherAndRenderSpecs, 500);
+                    setTimeout(gatherAndRenderSpecs, 1500);
+                } catch (e) {
+                    console.warn('建立 Worklet 失敗，回退 RecordRTC:', e);
+                    usingWorklet = false;
+                }
+            }
 
-                recorder.startRecording();
-                // 剛開始錄音立即與延遲重新抓取 internalRecorder 資訊
-                gatherAndRenderSpecs();
-                setTimeout(gatherAndRenderSpecs, 500);
-                setTimeout(gatherAndRenderSpecs, 1500);
-            } catch(recErr) {
-                console.error('RecordRTC 初始化失敗:', recErr);
-                alert('錄音器初始化失敗，請檢查瀏覽器權限或稍後再試。');
-                // 還原 UI 狀態
-                isCurrentlyRecording = false;
-                is_ready_to_record = true;
-                is_recording = false;
-                toggleButton.classList.remove('recording');
-                toggleButton.innerHTML = '● 開始錄音';
-                // 重新啟用 AGC 切換
-                var agcToggle = document.getElementById('agc-toggle');
-                if (agcToggle) agcToggle.disabled = false;
-                return;
+            if (!usingWorklet) {
+                try {
+                    // 若已有處理後的 mediaDest，使用其串流進行錄製以套用前級增益
+                    var recordStream = (mediaDest && mediaDest.stream) ? mediaDest.stream : microphone;
+                    recorder = RecordRTC(recordStream, {
+                        type: 'audio',
+                        mimeType: 'audio/wav',
+                        recorderType: StereoAudioRecorder,
+                        numberOfAudioChannels: 1,
+                        bufferSize: 4096,
+                        timeSlice: 100,
+                        ondataavailable: function(blob) {
+                            appendBlobToAccumulatedWaveform(blob);
+                            gatherAndRenderSpecs();
+                        }
+                    });
+                    recorder.startRecording();
+                    gatherAndRenderSpecs();
+                    setTimeout(gatherAndRenderSpecs, 500);
+                    setTimeout(gatherAndRenderSpecs, 1500);
+                } catch(recErr) {
+                    console.error('RecordRTC 初始化失敗:', recErr);
+                    alert('錄音器初始化失敗，請檢查瀏覽器權限或稍後再試。');
+                    isCurrentlyRecording = false;
+                    is_ready_to_record = true;
+                    is_recording = false;
+                    toggleButton.classList.remove('recording');
+                    toggleButton.innerHTML = '● 開始錄音';
+                    var agcToggle = document.getElementById('agc-toggle');
+                    if (agcToggle) agcToggle.disabled = false;
+                    return;
+                }
             }
 
             // 開始計時顯示
             dateStarted = new Date().getTime();
             (function looper() {
-                if(!recorder) return;
+                // Worklet 模式同樣更新時間顯示；若 recorder 為 null 但 usingWorklet 為 true 仍持續顯示
+                if(!recorder && !usingWorklet) return;
                 document.querySelector('h3').innerHTML = 'Recording Duration: ' +
                     calculateTimeDuration((new Date().getTime() - dateStarted) / 1000);
                 setTimeout(looper, 1000);
             })();
 
-            // 保存麥克風引用
-        // 保留原始麥克風參考（供 specs 顯示 track 設定）
-        recorder.microphone = microphone;
+            // 保留原始麥克風參考（供 specs 顯示 track 設定）
+            if (recorder) recorder.microphone = microphone;
         });
     }).catch(function(err){
         console.error('Failed to initialize AudioContext at gesture:', err);
@@ -3981,7 +4254,22 @@ function stopRecording() {
      * 設定各種狀態變數並觸發停止錄音流程
      *--------------------------------------------------------------*/
     isCurrentlyRecording = false;            // 設定為非錄音中
-    recorder.stopRecording(stopRecordingCallback); // 停止錄音並執行回調
+    // 掉樣估時計時終點
+    recordWallStopMs = performance.now();
+    if (usingWorklet) {
+        // 停止 Worklet：斷開連線並封裝 WAV
+        try {
+            if (pcmCollectorNode) {
+                pcmCollectorNode.port.onmessage = null;
+                preGainNode && preGainNode.disconnect(pcmCollectorNode);
+                pcmCollectorNode.disconnect();
+            }
+        } catch(e){ console.warn('斷開 Worklet 失敗', e); }
+        // 組裝最終 PCM -> WAV
+        finalizeWorkletRecording();
+    } else if (recorder) {
+        recorder.stopRecording(stopRecordingCallback); // 停止錄音並執行回調
+    }
     
     // 更新狀態變數
     is_ready_to_record = true;               // 設定為準備錄音狀態
@@ -3996,6 +4284,100 @@ function stopRecording() {
     // 保留 VU Meter 繼續更新（播放階段仍需顯示）
     // 停止瞬間（Blob 尚未生成）先更新一次，稍後 stopRecordingCallback 會再更新
     gatherAndRenderSpecs();
+}
+
+function finalizeWorkletRecording(){
+    try {
+        if (!pcmChunks.length || !audioContext) {
+            showToast('無錄音資料或 AudioContext 缺失');
+            return;
+        }
+        var total = pcmTotalSamples;
+        var merged = new Float32Array(total);
+        var offset = 0;
+        for (var i=0;i<pcmChunks.length;i++) { merged.set(pcmChunks[i], offset); offset += pcmChunks[i].length; }
+        // 轉成 16-bit PCM WAV
+        var wavBuffer = buildWavFromFloat32Mono(merged, audioContext.sampleRate);
+        var blob = new Blob([wavBuffer], { type:'audio/wav' });
+        if (latestRecordingUrl) { URL.revokeObjectURL(latestRecordingUrl); latestRecordingUrl=null; }
+        latestRecordingBlob = blob;
+        latestRecordingUrl = URL.createObjectURL(blob);
+        audio.srcObject = null;
+        audio.src = latestRecordingUrl;
+        try { audio.muted = false; audio.controls = true; } catch(e){}
+        // 建立預設視窗選取
+        try {
+            if (accumulatedWaveform && accumulatedWaveform.sampleCount>0 && audioContext) {
+                var effRate = (accumulatedWaveform.sourceSampleRate || audioContext.sampleRate)/Math.max(1, accumulatedWaveform.decimationFactor||1);
+                var samplesWin = Math.max(1, Math.ceil(defaultWindowSeconds * effRate));
+                var totalS = accumulatedWaveform.sampleCount;
+                var windowSamples = Math.min(samplesWin, totalS);
+                accumulatedWaveform.zoomFactor = totalS / windowSamples;
+                accumulatedWaveform.viewStart = 0;
+                accumulatedWaveform.isAutoScroll = false;
+                selectionStart = 0;
+                selectionEnd = Math.min(totalS - 1, windowSamples);
+                accumulatedWaveform._enforceViewBounds();
+                accumulatedWaveform.draw();
+            }
+        } catch(e){ console.warn('預設視窗設定失敗', e); }
+        if (liveWaveform) { try { liveWaveform.stop(); } catch(_){} liveWaveform=null; }
+        if (downloadButton) {
+            downloadButton.disabled = false;
+            // 綁定下載動作
+            downloadButton.onclick = function(){ if(latestRecordingUrl) window.open(latestRecordingUrl); };
+        }
+        // 啟動上傳（重用全域 uploadToServer）
+        uploadToServer(blob, function(progress, fileURL){
+            var btn = downloadButton;
+            if (!btn) return;
+            if (progress === 'ended') {
+                btn.innerHTML = 'Server Download';
+                btn.onclick = function(){ window.open(fileURL); };
+            } else if (progress && typeof progress === 'string') {
+                btn.innerHTML = progress;
+            }
+        });
+        updatePlaybackButtonsState();
+        gatherAndRenderSpecs();
+        showToast('錄音完成 (Worklet)');
+    } catch(e){ console.error('finalizeWorkletRecording failed', e); showToast('封裝錄音失敗'); }
+}
+
+function buildWavFromFloat32Mono(float32, sampleRate){
+    var bytesPerSample = 2;
+    var blockAlign = bytesPerSample * 1;
+    var byteRate = sampleRate * blockAlign;
+    var dataSize = float32.length * bytesPerSample;
+    var buffer = new ArrayBuffer(44 + dataSize);
+    var view = new DataView(buffer);
+    var writeStr = function(off,str){ for(var i=0;i<str.length;i++) view.setUint8(off+i,str.charCodeAt(i)); };
+    writeStr(0,'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeStr(8,'WAVE');
+    writeStr(12,'fmt ');
+    view.setUint32(16,16,true); // PCM chunk size
+    view.setUint16(20,1,true); // PCM format
+    view.setUint16(22,1,true); // channels
+    view.setUint32(24,sampleRate,true);
+    view.setUint32(28,byteRate,true);
+    view.setUint16(32,blockAlign,true);
+    view.setUint16(34,bytesPerSample*8,true);
+    writeStr(36,'data');
+    view.setUint32(40,dataSize,true);
+    // PCM samples
+    var offset = 44;
+    for (var i=0;i<float32.length;i++) {
+        var s = float32[i];
+        // 軟削波 + clamp（與原邏輯一致）
+        if (s > 1) s = 1; else if (s < -1) s = -1;
+        var soft = Math.tanh(s * 2.2) / Math.tanh(2.2);
+        var v = Math.max(-1, Math.min(1, soft));
+        var int16 = v < 0 ? v * 0x8000 : v * 0x7FFF;
+        view.setInt16(offset, int16, true);
+        offset += 2;
+    }
+    return buffer;
 }
 
 // 測試音控制已移除
