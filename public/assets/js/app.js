@@ -23,6 +23,12 @@ var orientationManager = {
         if(this.mode === m) return;
         this.mode = m;
         applyDisplayMode();
+        // 切換模式時調整提示文字
+        updateModeHints();
+        // 若從垂直回到水平，恢復 live 波形繪製
+        if (m === 'horizontal' && liveWaveform && typeof liveWaveform.start === 'function') {
+            try { liveWaveform.start(); } catch(e){}
+        }
     },
     isVertical: function(){ return this.mode === 'vertical'; }
 };
@@ -107,6 +113,32 @@ function applyDisplayMode(){
     }
 }
 
+// 動態顯示不同模式的使用提示
+function updateModeHints(){
+    var hintSpan = document.querySelector('#accumulated-toolbar .hint');
+    if(!hintSpan) return;
+    if(orientationManager.isVertical()){
+        hintSpan.textContent = '垂直模式：左側總覽拖曳可選取範圍；右側細節區可平移/長按建立選取並拖曳綠色圓點調整。';
+    } else {
+        hintSpan.innerHTML = '電腦：拖曳平移 | Shift+拖曳選取/拉伸 | Ctrl+滾輪縮放<br>手機：拖曳平移 | 長按選取 | 拖曳綠色圓點調整';
+    }
+}
+
+// 初次載入根據視窗比例自動套用垂直模式（高>寬且比值>1.1）
+function autoDetectInitialOrientation(){
+    try {
+        var h = window.innerHeight, w = window.innerWidth;
+        if (h > w && (h / w) > 1.1) {
+            orientationManager.mode = 'vertical';
+            applyDisplayMode();
+            updateModeHints();
+        } else {
+            updateModeHints();
+        }
+    } catch(e){ updateModeHints(); }
+}
+autoDetectInitialOrientation();
+
 if (displayModeRadios && displayModeRadios.length) {
     displayModeRadios.forEach(function(radio){
         radio.addEventListener('change', function(){
@@ -157,6 +189,19 @@ var vuMeter = null;               // VU Meter 實例
 var lastSpecs = {}; // 保存最近一次顯示的規格
 var preferredMicKey = 'preferredMicDeviceId';
 var selectedMicDeviceId = localStorage.getItem(preferredMicKey) || '';
+var lastAudioConstraintsUsed = null; // 供規格面板顯示
+
+// 輕量提示訊息（使用頁腳 #send-message）
+var __noticeTimer = null;
+function showNotice(msg, duration){
+    var el = document.getElementById('send-message');
+    if(!el) return;
+    el.textContent = msg;
+    if (__noticeTimer) { clearTimeout(__noticeTimer); }
+    __noticeTimer = setTimeout(function(){
+        try { el.textContent = ''; } catch(e){}
+    }, duration || 2200);
+}
 
 function detectEnvironment() {
     var ua = navigator.userAgent || '';
@@ -217,7 +262,18 @@ function gatherAndRenderSpecs() {
             if (settings.echoCancellation !== undefined) parts.push('AEC=' + settings.echoCancellation);
             if (settings.noiseSuppression !== undefined) parts.push('NS=' + settings.noiseSuppression);
             if (settings.autoGainControl !== undefined) parts.push('AGC=' + settings.autoGainControl);
-            specs.input = parts.length ? parts.join(', ') : '（無可用設定）';
+            var baseInput = parts.length ? parts.join(', ') : '（無可用設定）';
+            if (lastAudioConstraintsUsed) {
+                try {
+                    var c = JSON.parse(JSON.stringify(lastAudioConstraintsUsed));
+                    // deviceId 統一顯示為字串或 exact 值
+                    if (c.deviceId && typeof c.deviceId === 'object' && c.deviceId.exact) {
+                        c.deviceId = c.deviceId.exact;
+                    }
+                    baseInput += ' | constraints=' + JSON.stringify(c);
+                } catch(e) {}
+            }
+            specs.input = baseInput;
         } else {
             specs.input = '無音訊 track';
         }
@@ -371,6 +427,7 @@ if (micSelect) {
         }
         selectedMicDeviceId = newId;
         localStorage.setItem(preferredMicKey, selectedMicDeviceId);
+        showNotice('將在下次開始錄音時使用此麥克風');
         gatherAndRenderSpecs();
     });
 }
@@ -1741,16 +1798,35 @@ function captureMicrophone(callback) {
         audioConstraints.deviceId = { exact: selectedMicDeviceId };
     }
 
-    navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints,
-        video: false
-    }).then(function(microphone) {
-        callback(microphone);           // 成功時執行回調
-    }).catch(function(error) {
-        // 錯誤處理：顯示錯誤訊息並記錄到控制台
-        alert('Unable to capture your microphone. Please check console logs.');
-        console.error(error);
-    });
+    lastAudioConstraintsUsed = audioConstraints;
+
+    navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
+        .then(function(microphone) {
+            callback(microphone);           // 成功時執行回調
+        }).catch(function(error) {
+            // 若因指定 deviceId 導致找不到裝置，嘗試退回預設裝置
+            var name = (error && (error.name || error.code)) || '';
+            var overconstrained = name === 'OverconstrainedError' || name === 'NotFoundError' || name === 'OverconstrainedErrorEvent';
+            if (overconstrained && audioConstraints && audioConstraints.deviceId) {
+                console.warn('Specified deviceId not available, falling back to default device.', error);
+                showNotice('選擇的麥克風無法使用，已改用預設裝置。');
+                var fallbackConstraints = {
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: agcEnabled
+                };
+                lastAudioConstraintsUsed = fallbackConstraints;
+                return navigator.mediaDevices.getUserMedia({ audio: fallbackConstraints, video: false })
+                    .then(function(m){ callback(m); })
+                    .catch(function(err){
+                        alert('Unable to capture your microphone. Please check console logs.');
+                        console.error(err);
+                    });
+            }
+            // 其它錯誤：顯示錯誤訊息並記錄到控制台
+            alert('Unable to capture your microphone. Please check console logs.');
+            console.error(error);
+        });
 }
 
 /*=================================================================
