@@ -37,14 +37,14 @@ html {
  * - 每個區塊高度 80vh，canvas 填滿容器
  * ================================================================ */
 #waveform-wrapper.mode-vertical {
-    display: flex;
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: 25% 1fr; /* overview | accumulated */
     align-items: stretch;
-    justify-content: center;
-    gap: 12px;
+    justify-content: stretch;
+    gap: 8px;
     width: 100%;
     margin: 12px auto;
-    overflow-x: auto; /* 螢幕過窄時可水平捲動 */
+    overflow: hidden; /* 不希望水平捲動 */
 }
 
 #waveform-wrapper.mode-vertical .waveform-col {
@@ -60,9 +60,14 @@ html {
 }
 
 /* 左→右：overview | accumulated（live 在垂直模式隱藏） */
-#waveform-wrapper.mode-vertical .overview-col { flex: 0 0 22%; min-width: 160px; }
-#waveform-wrapper.mode-vertical .accumulated-col { flex: 1 1 0; min-width: 260px; }
+#waveform-wrapper.mode-vertical .overview-col { min-width: 0; }
+#waveform-wrapper.mode-vertical .accumulated-col { min-width: 0; }
 #waveform-wrapper.mode-vertical .live-col { display: none; }
+
+/* 小螢幕比例微調，避免 overview 過窄或造成換行 */
+@media (max-width: 600px) {
+    #waveform-wrapper.mode-vertical { grid-template-columns: 32% 1fr; }
+}
 
 #waveform-wrapper.mode-vertical canvas {
     width: 100% !important;
