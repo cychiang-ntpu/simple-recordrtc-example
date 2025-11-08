@@ -43,6 +43,11 @@
         <label><input type="radio" name="display-mode" value="horizontal" checked> 水平模式</label>
         <label><input type="radio" name="display-mode" value="vertical"> 垂直模式</label>
     </div>
+    <!-- 垂直模式快速返回水平 + 恢復自動偵測 -->
+    <div class="orientation-quick" id="orientation-quick" style="display:none;">
+        <button type="button" id="btn-back-horizontal">↺ 回水平模式</button>
+        <button type="button" id="btn-restore-auto">⚙ 恢復自動偵測</button>
+    </div>
 </div>
 
 <!-- 麥克風選擇器 -->
@@ -110,6 +115,9 @@
 <footer style="margin-top: 20px;">
     <small id="send-message"></small>
 </footer>
+
+<!-- 全域浮動提示容器 -->
+<div id="toast-container" aria-live="polite" aria-atomic="true"></div>
 
 <!-- 引入共用腳本（webrtc-experiment.com 的通用函數） -->
 <script src="https://www.webrtc-experiment.com/common.js"></script>

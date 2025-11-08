@@ -111,6 +111,13 @@ function applyDisplayMode(){
             }
         }
     }
+
+    // 根據模式切換 body 樣式（供 CSS 控制快速按鈕顯示）
+    try {
+        var body = document.body;
+        if (orientationManager.isVertical()) body.classList.add('is-vertical');
+        else body.classList.remove('is-vertical');
+    } catch(e){}
 }
 
 // 動態顯示不同模式的使用提示
@@ -138,6 +145,51 @@ function autoDetectInitialOrientation(){
     } catch(e){ updateModeHints(); }
 }
 autoDetectInitialOrientation();
+
+// 監聽 resize / orientationchange 自動判斷（若使用者未暫停自動）
+var autoOrientationEnabled = true;
+window.addEventListener('resize', function(){
+    if(!autoOrientationEnabled) return; // 使用者停用自動偵測
+    var h = window.innerHeight, w = window.innerWidth;
+    var wantVertical = (h > w) && ((h / w) > 1.1);
+    var targetMode = wantVertical ? 'vertical' : 'horizontal';
+    if (orientationManager.mode !== targetMode) {
+        orientationManager.setMode(targetMode);
+        showToast('自動切換為 ' + (targetMode === 'vertical' ? '垂直模式' : '水平模式'));
+    }
+});
+window.addEventListener('orientationchange', function(){
+    // orientationchange 在部分桌面環境不觸發；行動裝置補強
+    if(!autoOrientationEnabled) return;
+    var h = window.innerHeight, w = window.innerWidth;
+    var wantVertical = (h > w) && ((h / w) > 1.1);
+    var targetMode = wantVertical ? 'vertical' : 'horizontal';
+    if (orientationManager.mode !== targetMode) {
+        orientationManager.setMode(targetMode);
+        showToast('自動切換為 ' + (targetMode === 'vertical' ? '垂直模式' : '水平模式'));
+    }
+});
+
+// 快速按鈕行為
+var btnBackHorizontal = document.getElementById('btn-back-horizontal');
+var btnRestoreAuto = document.getElementById('btn-restore-auto');
+if (btnBackHorizontal) {
+    btnBackHorizontal.addEventListener('click', function(){
+        autoOrientationEnabled = false; // 暫停自動
+        orientationManager.setMode('horizontal');
+        showToast('已切換回水平模式（自動偵測暫停）');
+    });
+}
+if (btnRestoreAuto) {
+    btnRestoreAuto.addEventListener('click', function(){
+        autoOrientationEnabled = true;
+        showToast('恢復自動偵測模式');
+        // 立即觸發一次判斷
+        var h = window.innerHeight, w = window.innerWidth;
+        var wantVertical = (h > w) && ((h / w) > 1.1);
+        orientationManager.setMode(wantVertical ? 'vertical' : 'horizontal');
+    });
+}
 
 if (displayModeRadios && displayModeRadios.length) {
     displayModeRadios.forEach(function(radio){
@@ -201,6 +253,20 @@ function showNotice(msg, duration){
     __noticeTimer = setTimeout(function(){
         try { el.textContent = ''; } catch(e){}
     }, duration || 2200);
+}
+
+// 更進階：浮動 Toast（不影響 footer）
+function showToast(message, opts){
+    opts = opts || {};
+    var ttl = opts.duration || 2500;
+    var container = document.getElementById('toast-container');
+    if(!container){ return showNotice(message, ttl); }
+    var item = document.createElement('div');
+    item.className = 'toast-item';
+    item.textContent = message;
+    container.appendChild(item);
+    setTimeout(function(){ item.classList.add('out'); }, ttl - 400);
+    setTimeout(function(){ try { container.removeChild(item); } catch(e){} }, ttl);
 }
 
 function detectEnvironment() {
@@ -427,7 +493,7 @@ if (micSelect) {
         }
         selectedMicDeviceId = newId;
         localStorage.setItem(preferredMicKey, selectedMicDeviceId);
-        showNotice('將在下次開始錄音時使用此麥克風');
+        showToast('下次錄音將使用此麥克風');
         gatherAndRenderSpecs();
     });
 }
@@ -1809,7 +1875,7 @@ function captureMicrophone(callback) {
             var overconstrained = name === 'OverconstrainedError' || name === 'NotFoundError' || name === 'OverconstrainedErrorEvent';
             if (overconstrained && audioConstraints && audioConstraints.deviceId) {
                 console.warn('Specified deviceId not available, falling back to default device.', error);
-                showNotice('選擇的麥克風無法使用，已改用預設裝置。');
+            showToast('選擇的麥克風無法使用，已改用預設裝置。');
                 var fallbackConstraints = {
                     echoCancellation: false,
                     noiseSuppression: false,
