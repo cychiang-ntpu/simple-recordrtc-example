@@ -66,6 +66,38 @@ html, body {
 #waveform-wrapper.mode-horizontal .overview-col { order: 2; }
 #waveform-wrapper.mode-horizontal .live-col { display: none; }
 
+/* 進階設定折疊面板 */
+details.advanced-panel {
+        max-width: 1400px;
+        margin: 10px auto 0;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-bg);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+}
+details.advanced-panel > summary {
+        padding: 10px 14px;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--color-bg-alt);
+        list-style: none;
+        user-select: none;
+}
+details.advanced-panel > summary::-webkit-details-marker { display:none; }
+details.advanced-panel[open] > summary { border-bottom: 1px solid var(--color-border); }
+details.advanced-panel .advanced-content { padding: 12px 14px 18px; display: flex; flex-direction: column; gap: 16px; }
+
+/* 迷你音量條（核心區簡化版 VU） */
+.mini-level { position: relative; width: 160px; height: 10px; background: #e2e8f0; border-radius: 6px; overflow:hidden; box-shadow: inset 0 0 2px rgba(0,0,0,0.15); }
+#mini-level-bar { position:absolute; top:0; left:0; height:100%; width:0%; background: linear-gradient(90deg,#4CAF50,#f6d600,#f44336); transition: width 0.15s linear; }
+.button-container { flex-wrap: wrap; }
+.button-container .mini-level { align-self: center; margin: 4px 8px; }
+
+@media (max-width: 600px) {
+    .mini-level { width: 120px; }
+}
+
 /* 預設視窗秒數設定區塊 */
 .default-window-container {
     max-width: 1400px;

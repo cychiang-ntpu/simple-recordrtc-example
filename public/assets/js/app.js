@@ -264,6 +264,22 @@ function showToast(message, opts){
     setTimeout(function(){ try { container.removeChild(item); } catch(e){} }, ttl);
 }
 
+// 迷你音量條更新（RMS/Peak 來源）
+function updateMiniLevelBar(rmsDb, peakDb){
+    try {
+        var bar = document.getElementById('mini-level-bar');
+        if (!bar) return;
+        var minDb = -90, maxDb = 0;
+        if (!isFinite(rmsDb)) rmsDb = minDb;
+        var norm = (rmsDb - minDb) / (maxDb - minDb);
+        if (norm < 0) norm = 0; if (norm > 1) norm = 1;
+        bar.style.width = (norm * 100).toFixed(1) + '%';
+        var tip = 'RMS ' + (rmsDb <= minDb ? '-∞' : rmsDb.toFixed(1)) + ' dBFS';
+        if (isFinite(peakDb)) tip += ' | Peak ' + (peakDb <= minDb ? '-∞' : peakDb.toFixed(1)) + ' dBFS';
+        bar.title = tip;
+    } catch(e) {}
+}
+
 function detectEnvironment() {
     var ua = navigator.userAgent || '';
     var isElectron = !!(window && window.process && window.process.type);
@@ -929,6 +945,8 @@ VUMeter.prototype.update = function() {
         }
     }
     this.draw(this.levelDb);
+    // 同步更新核心區迷你條
+    updateMiniLevelBar(this.levelDb, this.peakDb);
 };
 
 VUMeter.prototype.start = function() {

@@ -28,7 +28,7 @@
         <span>啟用自動增益控制 (AGC)</span>
     </label>
     <small class="agc-hint">關閉可減少錄音啟動延遲，但音量可能較小且不穩定</small>
-</div>
+ </div>
 
 <!-- 前級增益（僅在 AGC 關閉時生效） -->
 <div class="mic-gain-container" id="mic-gain-container">
@@ -36,7 +36,7 @@
     <input type="range" id="mic-gain" min="1" max="6" step="0.1" value="2.5" aria-label="Microphone pre-amplification">
     <span id="mic-gain-value">2.5x</span>
     <small class="mic-gain-hint">可在開始錄音前調整，改善 iPhone 音量偏小問題。</small>
-</div>
+ </div>
 
 <!-- 預設視窗秒數設定 -->
 <div class="default-window-container" id="default-window-container">
@@ -44,9 +44,9 @@
     <input type="number" id="default-window-seconds" min="0.1" max="30" step="0.1" value="1.0" aria-label="Default window seconds">
     <button type="button" id="btn-reset-window-seconds" title="重設為 1.0 秒">重設</button>
     <span class="default-window-hint">錄音結束後與點擊 Overview 將聚焦此秒數範圍；若音訊短於此值則使用整段。</span>
-</div>
+ </div>
 
-<!-- 錄音與顯示模式控制按鈕區域 -->
+<!-- 錄音與顯示模式控制按鈕區域（核心操作） -->
 <div class="button-container">
     <button id="btn-toggle-recording" class="recording-toggle">● 開始錄音</button>
     <button id="btn-play" class="play-button" disabled>▶ 播放</button>
@@ -55,43 +55,13 @@
     <button id="btn-jump-start" disabled>⏮ 回到開始</button>
     <button id="btn-clear-selection" disabled>✕ 取消選取區間</button>
     <button id="btn-download-recording" disabled>下載錄音</button>
-    <div class="display-mode-toggle">
-        <label><input type="radio" name="display-mode" value="horizontal" checked> 水平模式</label>
-        <label><input type="radio" name="display-mode" value="vertical"> 垂直模式</label>
-    </div>
-    <!-- 垂直模式快速返回水平 + 恢復自動偵測 -->
-    <div class="orientation-quick" id="orientation-quick" style="display:none;">
-        <button type="button" id="btn-back-horizontal">↺ 回水平模式</button>
-        <button type="button" id="btn-restore-auto">⚙ 恢復自動偵測</button>
+    <!-- 迷你音量條（核心區） -->
+    <div class="mini-level" aria-label="Level">
+        <div id="mini-level-bar"></div>
     </div>
 </div>
 
-<!-- 麥克風選擇器 -->
-<div class="mic-select-container" id="mic-select-container">
-    <label for="mic-select" class="mic-label">輸入裝置 Microphone</label>
-    <select id="mic-select" class="mic-select" aria-label="Select Microphone" disabled>
-        <option>讀取裝置中…</option>
-    </select>
-    <button type="button" id="btn-refresh-mics" class="mic-refresh" title="重新整理裝置清單">重新整理</button>
-    <small class="mic-hint" id="mic-hint">如顯示未授權，請先允許麥克風存取再按重新整理。</small>
-    </div>
-
 <!-- 波形容器：支援水平與垂直模式 -->
-<!-- 置頂 VU Meter -->
-<div class="vu-container">
-    <canvas id="vu-meter" width="750" height="24" aria-label="VU Meter"></canvas>
-    <details id="recording-specs" class="specs-panel" open>
-        <summary>錄音規格 Recording specs</summary>
-        <div id="audio-specs-content">
-            <div class="spec-line"><span class="label">環境 Environment</span><span class="value" id="spec-env">-</span></div>
-            <div class="spec-line"><span class="label">輸入 Input (MediaTrack)</span><span class="value" id="spec-input">尚未開始錄音</span></div>
-            <div class="spec-line"><span class="label">AudioContext</span><span class="value" id="spec-context">-</span></div>
-            <div class="spec-line"><span class="label">Recorder</span><span class="value" id="spec-recorder">-</span></div>
-            <div class="spec-line"><span class="label">輸出 Output (WAV)</span><span class="value" id="spec-output">-</span></div>
-            <div class="spec-line"><span class="label">顯示 Decimation</span><span class="value" id="spec-decimation">-</span></div>
-        </div>
-    </details>
-    </div>
 
 <div id="waveform-wrapper" class="waveform-wrapper mode-horizontal">
     <div class="waveform-col overview-col" style="grid-column: 1;">
@@ -105,15 +75,76 @@
     </div>
 </div>
 
-<div id="accumulated-toolbar" class="waveform-toolbar">
-    <button type="button" id="accum-pan-left">&larr; 向左</button>
-    <button type="button" id="accum-zoom-out">縮小</button>
-    <button type="button" id="accum-zoom-in">放大</button>
-    <button type="button" id="accum-pan-right">向右 &rarr;</button>
-    <button type="button" id="accum-zoom-reset">重置視圖</button>
-    <span class="hint">電腦：拖曳平移 | Shift+拖曳選取/拉伸 | Ctrl+滾輪縮放<br>手機：拖曳平移 | 長按選取 | 拖曳綠色圓點調整</span>
-    <span class="window-indicator">可視範圍：<strong id="visible-window-seconds">-</strong></span>
-</div>
+<!-- 進階設定（預設收合） -->
+<details id="advanced-settings" class="advanced-panel">
+    <summary>進階設定 Advanced</summary>
+    <div class="advanced-content">
+        <div class="display-mode-toggle">
+            <label><input type="radio" name="display-mode" value="horizontal" checked> 水平模式</label>
+            <label><input type="radio" name="display-mode" value="vertical"> 垂直模式</label>
+        </div>
+        <div class="orientation-quick" id="orientation-quick" style="display:none;">
+            <button type="button" id="btn-back-horizontal">↺ 回水平模式</button>
+            <button type="button" id="btn-restore-auto">⚙ 恢復自動偵測</button>
+        </div>
+
+        <div class="mic-select-container" id="mic-select-container">
+            <label for="mic-select" class="mic-label">輸入裝置 Microphone</label>
+            <select id="mic-select" class="mic-select" aria-label="Select Microphone" disabled>
+                <option>讀取裝置中…</option>
+            </select>
+            <button type="button" id="btn-refresh-mics" class="mic-refresh" title="重新整理裝置清單">重新整理</button>
+            <small class="mic-hint" id="mic-hint">如顯示未授權，請先允許麥克風存取再按重新整理。</small>
+        </div>
+
+        <div class="agc-container">
+            <label class="agc-label">
+                <input type="checkbox" id="agc-toggle" checked>
+                <span>啟用自動增益控制 (AGC)</span>
+            </label>
+            <small class="agc-hint">關閉可減少錄音啟動延遲，但音量可能較小且不穩定</small>
+        </div>
+
+        <div class="mic-gain-container" id="mic-gain-container">
+            <label for="mic-gain" class="mic-gain-label">前級增益 Mic Gain (AGC 關閉才會套用)</label>
+            <input type="range" id="mic-gain" min="1" max="6" step="0.1" value="2.5" aria-label="Microphone pre-amplification">
+            <span id="mic-gain-value">2.5x</span>
+            <small class="mic-gain-hint">可在開始錄音前調整，改善 iPhone 音量偏小問題。</small>
+        </div>
+
+        <div class="default-window-container" id="default-window-container">
+            <label for="default-window-seconds" class="default-window-label">預設顯示視窗秒數 (Overview/錄音完成)</label>
+            <input type="number" id="default-window-seconds" min="0.1" max="30" step="0.1" value="1.0" aria-label="Default window seconds">
+            <button type="button" id="btn-reset-window-seconds" title="重設為 1.0 秒">重設</button>
+            <span class="default-window-hint">錄音結束後與點擊 Overview 將聚焦此秒數範圍；若音訊短於此值則使用整段。</span>
+        </div>
+
+        <div class="vu-container">
+            <canvas id="vu-meter" width="750" height="24" aria-label="VU Meter"></canvas>
+            <details id="recording-specs" class="specs-panel" open>
+                <summary>錄音規格 Recording specs</summary>
+                <div id="audio-specs-content">
+                    <div class="spec-line"><span class="label">環境 Environment</span><span class="value" id="spec-env">-</span></div>
+                    <div class="spec-line"><span class="label">輸入 Input (MediaTrack)</span><span class="value" id="spec-input">尚未開始錄音</span></div>
+                    <div class="spec-line"><span class="label">AudioContext</span><span class="value" id="spec-context">-</span></div>
+                    <div class="spec-line"><span class="label">Recorder</span><span class="value" id="spec-recorder">-</span></div>
+                    <div class="spec-line"><span class="label">輸出 Output (WAV)</span><span class="value" id="spec-output">-</span></div>
+                    <div class="spec-line"><span class="label">顯示 Decimation</span><span class="value" id="spec-decimation">-</span></div>
+                </div>
+            </details>
+        </div>
+
+        <div id="accumulated-toolbar" class="waveform-toolbar">
+            <button type="button" id="accum-pan-left">&larr; 向左</button>
+            <button type="button" id="accum-zoom-out">縮小</button>
+            <button type="button" id="accum-zoom-in">放大</button>
+            <button type="button" id="accum-pan-right">向右 &rarr;</button>
+            <button type="button" id="accum-zoom-reset">重置視圖</button>
+            <span class="hint">電腦：拖曳平移 | Shift+拖曳選取/拉伸 | Ctrl+滾輪縮放<br>手機：拖曳平移 | 長按選取 | 拖曳綠色圓點調整</span>
+            <span class="window-indicator">可視範圍：<strong id="visible-window-seconds">-</strong></span>
+        </div>
+    </div>
+</details>
 
 <br>
 
