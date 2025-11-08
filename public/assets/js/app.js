@@ -232,7 +232,7 @@ var analyser = null;     // 音頻分析器（延遲初始化）
 var analyserSilencer = null; // 用於避免回授的靜音輸出節點
 var preGainNode = null;      // 前級增益節點（AGC 關閉時可放大）
 var mediaDest = null;        // MediaStreamDestination（供 RecordRTC 使用的處理後串流）
-var micGainUserFactor = 1.0; // 使用者設定的前級增益倍率（預設 1.5x）
+var micGainUserFactor = 1.0; // 使用者設定的前級增益倍率（預設 1.0x）
 var defaultWindowSeconds = parseFloat(localStorage.getItem('defaultWindowSeconds') || '1.0'); // 使用者設定的預設視窗秒數
 
 // 即時/累積波形顯示變數
@@ -352,7 +352,7 @@ function gatherAndRenderSpecs() {
     // AudioContext 規格
     if (audioContext) {
         var baseLatency = (audioContext.baseLatency !== undefined) ? (' baseLatency=' + audioContext.baseLatency.toFixed ? audioContext.baseLatency.toFixed(3)+'s' : audioContext.baseLatency) : '';
-        specs.audioContext = 'sampleRate=' + audioContext.sampleRate + ' state=' + audioContext.state + baseLatency;
+            specs.audioContext = 'sampleRate=' + audioContext.sampleRate + ' state=' + audioContext.state + baseLatency + ' latency=' + (audioContext.baseLatency || 0).toFixed(3) + 's';
     } else {
         specs.audioContext = '尚未初始化';
     }
@@ -2392,11 +2392,11 @@ function captureMicrophone(callback) {
     var agcToggle = document.getElementById('agc-toggle');
     var agcEnabled = agcToggle ? agcToggle.checked : false;
 
-    // iOS 上若 AGC 關閉常見錄音音量偏低；若使用者尚未自訂增益 (保持預設 1.5x) 則自動提升到 3.5x
+    // iOS 上若 AGC 關閉常見錄音音量偏低；若使用者尚未自訂增益 (保持預設 1.0x) 則自動提升到 3.5x
     try {
         var ua = navigator.userAgent || '';
         var isIOS = /iphone|ipad|ipod/i.test(ua);
-        if (isIOS && !agcEnabled && micGainUserFactor && Math.abs(micGainUserFactor - 1.5) < 0.0001) {
+        if (isIOS && !agcEnabled && micGainUserFactor && Math.abs(micGainUserFactor - 1.0) < 0.0001) {
             micGainUserFactor = 3.5;
             var gainSlider = document.getElementById('mic-gain');
             var gainValue = document.getElementById('mic-gain-value');
