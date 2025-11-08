@@ -123,9 +123,18 @@ if (displayModeRadios && displayModeRadios.length) {
     if (vuCanvas) {
         vuMeter = new VUMeter(vuCanvas, analyser);
         // 嘗試啟動動畫循環；若 analyser 尚未就緒，之後也會更新
-        vuMeter.start();
+        if (vuMeter && typeof vuMeter.start === 'function') {
+            vuMeter.start();
+        }
     }
 })();
+
+// 調整：在播放暫停/停止後若仍有 analyser 需持續刷新 VU（避免 playback 後停住）
+function ensureVUMeterRunning(){
+    if (vuMeter && typeof vuMeter.start === 'function' && !vuMeter.animationId){
+        vuMeter.start();
+    }
+}
 
 // 錄音狀態控制變數
 var is_ready_to_record = true;   // 是否準備好錄音
@@ -145,6 +154,138 @@ var latestRecordingBlob = null;   // 最近一次錄音的 Blob
 var latestRecordingUrl = null;    // 最近一次錄音的 Object URL
 var accumulatedControlsBound = false; // 是否已綁定累積波形互動
 var vuMeter = null;               // VU Meter 實例
+// 測試音功能已移除
+// 規格面板更新相關
+var lastSpecs = {}; // 保存最近一次顯示的規格
+
+function detectEnvironment() {
+    var ua = navigator.userAgent || '';
+    var isElectron = !!(window && window.process && window.process.type);
+    var isCapacitor = !!(window && window.Capacitor);
+    var platform = 'Browser';
+    if (isElectron) platform = 'Electron App';
+    else if (isCapacitor) platform = 'Capacitor (Mobile App)';
+    var os = '-';
+    try {
+        if (/windows/i.test(ua)) os = 'Windows';
+        else if (/mac os x/i.test(ua)) os = 'macOS';
+        else if (/android/i.test(ua)) os = 'Android';
+        else if (/iphone|ipad|ipod/i.test(ua)) os = 'iOS';
+        else if (/linux/i.test(ua)) os = 'Linux';
+    } catch(e){}
+    return platform + ' / ' + os;
+}
+
+function formatOrNA(v) {
+    if (v === undefined || v === null || v === '') return '(未提供)';
+    return v;
+}
+
+function gatherAndRenderSpecs() {
+    var envEl = document.getElementById('spec-env');
+    var inputEl = document.getElementById('spec-input');
+    var ctxEl = document.getElementById('spec-context');
+    var recEl = document.getElementById('spec-recorder');
+    var outEl = document.getElementById('spec-output');
+    var decEl = document.getElementById('spec-decimation');
+    if (!envEl) return; // 若面板不存在則略過
+
+    var specs = {};
+    // 環境
+    specs.environment = detectEnvironment();
+
+    // AudioContext 規格
+    if (audioContext) {
+        var baseLatency = (audioContext.baseLatency !== undefined) ? (' baseLatency=' + audioContext.baseLatency.toFixed ? audioContext.baseLatency.toFixed(3)+'s' : audioContext.baseLatency) : '';
+        specs.audioContext = 'sampleRate=' + audioContext.sampleRate + ' state=' + audioContext.state + baseLatency;
+    } else {
+        specs.audioContext = '尚未初始化';
+    }
+
+    // MediaTrack 規格（若正在錄音且存在麥克風）
+    if (isCurrentlyRecording && recorder && recorder.microphone) {
+        var tracks = recorder.microphone.getAudioTracks ? recorder.microphone.getAudioTracks() : [];
+        if (tracks && tracks.length) {
+            var settings = tracks[0].getSettings ? tracks[0].getSettings() : {};
+            var parts = [];
+            if (settings.sampleRate) parts.push('sampleRate=' + settings.sampleRate);
+            if (settings.channelCount) parts.push('channelCount=' + settings.channelCount);
+            if (settings.sampleSize) parts.push('sampleSize=' + settings.sampleSize + 'bit');
+            if (settings.latency) parts.push('latency=' + settings.latency + 's');
+            if (settings.echoCancellation !== undefined) parts.push('AEC=' + settings.echoCancellation);
+            if (settings.noiseSuppression !== undefined) parts.push('NS=' + settings.noiseSuppression);
+            if (settings.autoGainControl !== undefined) parts.push('AGC=' + settings.autoGainControl);
+            specs.input = parts.length ? parts.join(', ') : '（無可用設定）';
+        } else {
+            specs.input = '無音訊 track';
+        }
+    } else {
+        specs.input = '尚未開始錄音';
+    }
+
+    // RecordRTC/StereoAudioRecorder 規格
+    if (recorder) {
+        try {
+            var internal = recorder.getInternalRecorder ? recorder.getInternalRecorder() : null;
+            if (internal) {
+                var recParts = [];
+                recParts.push('channels=' + internal.numberOfAudioChannels);
+                if (internal.sampleRate) recParts.push('sampleRate=' + internal.sampleRate + (internal.desiredSampRate ? ('->'+internal.desiredSampRate) : ''));
+                if (internal.bufferSize) recParts.push('bufferSize=' + internal.bufferSize);
+                recParts.push('format=WAV PCM 16-bit');
+                specs.recorder = recParts.join(', ');
+            } else {
+                specs.recorder = '內部錄音器尚未就緒';
+            }
+        } catch(e) {
+            specs.recorder = '取得失敗: ' + e.message;
+        }
+    } else {
+        specs.recorder = '未建立';
+    }
+
+    // WAV 輸出（錄音完成後）
+    if (latestRecordingBlob) {
+        var sizeKB = (latestRecordingBlob.size / 1024).toFixed(1) + 'KB';
+        var durationSec = '-';
+        try {
+            if (accumulatedWaveform && accumulatedWaveform.sampleCount && audioContext && audioContext.sampleRate) {
+                var frames = (accumulatedWaveform.sampleCount * (accumulatedWaveform.decimationFactor || 1));
+                durationSec = (frames / audioContext.sampleRate).toFixed(2) + 's';
+            }
+        } catch(e){}
+        specs.output = 'type=' + latestRecordingBlob.type + ', size=' + sizeKB + ', duration=' + durationSec;
+    } else {
+        specs.output = isCurrentlyRecording ? '錄音進行中...' : '尚未產生';
+    }
+
+    // Decimation 規格
+    if (accumulatedWaveform) {
+        specs.decimation = 'targetRate=' + accumulatedWaveform.targetSampleRate + ', sourceRate=' + accumulatedWaveform.sourceSampleRate + ', factor=' + accumulatedWaveform.decimationFactor;
+    } else {
+        specs.decimation = '尚未建立累積波形';
+    }
+
+    function updateEl(el,key){
+        if (!el) return;
+        var val = specs[key];
+        if (lastSpecs[key] !== val) {
+            el.textContent = val;
+            lastSpecs[key] = val;
+        }
+    }
+    updateEl(envEl,'environment');
+    updateEl(inputEl,'input');
+    updateEl(ctxEl,'audioContext');
+    updateEl(recEl,'recorder');
+    updateEl(outEl,'output');
+    updateEl(decEl,'decimation');
+}
+
+// 啟動時先渲染一次基本資訊
+document.addEventListener('DOMContentLoaded', function(){
+    gatherAndRenderSpecs();
+});
 
 // 區域選取相關變數
 var selectionStart = null;        // 選取起始樣本索引
@@ -320,35 +461,42 @@ function VUMeter(canvas, analyserNode) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.analyser = analyserNode;
-    this.bufferLength = 2048; // 用較大緩衝增加 RMS 精度
-    this.timeData = new Uint8Array(this.bufferLength);
-    this.levelDb = -60;       // 目前 RMS dB
-    this.peakDb = -60;        // 目前峰值 dB
-    this.holdPeakDb = -60;    // Peak hold 顯示值
+    this.bufferLength = 2048; // 初始緩衝大小；會依 analyser 動態調整
+    this.timeData = new Float32Array(this.bufferLength); // 使用 float 格式，範圍約 [-1.0, 1.0]
+    this.levelDb = -90;       // 目前 RMS dBFS
+    this.peakDb = -90;        // 目前峰值 dBFS
+    this.holdPeakDb = -90;    // Peak hold 顯示值 (dBFS)
     this.lastPeakTime = 0;    // 最近一次更新峰值的時間戳
     this.peakHoldMillis = 1500; // 峰值保持時間
     this.fallRateDbPerSec = 20; // 峰值下降速度 (dB/s)
-    this.minDb = -60;
+    this.minDb = -90;         // dBFS 最低顯示範圍
     this.maxDb = 0;
     this.animationId = null;
 }
 
 VUMeter.prototype._computeLevels = function() {
-    if (!this.analyser) return { rmsDb: -60, peakDb: -60 };
-    // 讀取時域資料（8-bit）
-    this.analyser.getByteTimeDomainData(this.timeData);
+    if (!this.analyser) return { rmsDb: this.minDb, peakDb: this.minDb };
+    // 確保緩衝大小與 analyser 同步
+    var required = this.analyser.fftSize || this.bufferLength;
+    if (this.timeData.length !== required) {
+        this.bufferLength = required;
+        this.timeData = new Float32Array(required);
+    }
+    // 讀取浮點時域資料（-1.0 ~ 1.0）
+    this.analyser.getFloatTimeDomainData(this.timeData);
     var sumSquares = 0;
     var peak = 0;
     for (var i = 0; i < this.bufferLength; i++) {
-        var v = (this.timeData[i] - 128) / 128.0; // -1..1
+        var v = this.timeData[i];
+        if (v > 1) v = 1; else if (v < -1) v = -1; // 夾限避免異常
         sumSquares += v * v;
         var absV = Math.abs(v);
         if (absV > peak) peak = absV;
     }
     var rms = Math.sqrt(sumSquares / this.bufferLength);
     // 轉 dB：20 * log10(rms)，避免 log(0)
-    var rmsDb = rms > 0 ? 20 * Math.log10(rms) : this.minDb;
-    var peakDb = peak > 0 ? 20 * Math.log10(peak) : this.minDb;
+    var rmsDb = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+    var peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
     if (rmsDb < this.minDb) rmsDb = this.minDb;
     if (rmsDb > this.maxDb) rmsDb = this.maxDb;
     if (peakDb < this.minDb) peakDb = this.minDb;
@@ -391,6 +539,46 @@ VUMeter.prototype.draw = function(currentDb) {
     var barWidth = Math.round(w * norm);
     ctx.fillRect(0,0,barWidth,h);
 
+    // 刻度線與標籤 (每10dB一線、每20dB一文字) 以 dBFS (minDb 到 maxDb)
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (var db = this.minDb; db <= this.maxDb; db += 10) {
+        var posNorm = (db - this.minDb) / (this.maxDb - this.minDb);
+        if (posNorm < 0) posNorm = 0; if (posNorm > 1) posNorm = 1;
+        var xPos = Math.round(w * posNorm) + 0.5;
+        // 高亮 0dBFS 主線
+        if (db === 0) {
+            ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+            ctx.beginPath(); ctx.moveTo(xPos,0); ctx.lineTo(xPos,h); ctx.stroke();
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        } else {
+            ctx.moveTo(xPos,0); ctx.lineTo(xPos,h*0.4);
+            ctx.moveTo(xPos,h); ctx.lineTo(xPos,h*0.6);
+        }
+        // 文字標籤每20dB顯示，且 0 / -10 特殊顏色
+        if (db % 20 === 0 || db === -10) {
+            var label = db.toString();
+            ctx.fillStyle = (db === 0) ? '#ffffff' : (db === -10 ? '#ffeb3b' : '#cbd5e0');
+            ctx.font = '10px -apple-system,Segoe UI,sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(label, xPos, 1);
+        }
+    }
+    ctx.restore();
+
+    // -10dBFS 區域高亮（半透明覆蓋）
+    var minus10Norm = (-10 - this.minDb) / (this.maxDb - this.minDb);
+    if (minus10Norm > 0 && minus10Norm < 1) {
+        var minus10X = Math.round(w * minus10Norm);
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,235,59,0.08)';
+        ctx.fillRect(minus10X - 2,0,4,h);
+        ctx.restore();
+    }
+
     // 峰值 hold 指示線
     var holdNorm = (this.holdPeakDb - this.minDb) / (this.maxDb - this.minDb);
     if (holdNorm < 0) holdNorm = 0; if (holdNorm > 1) holdNorm = 1;
@@ -407,7 +595,9 @@ VUMeter.prototype.draw = function(currentDb) {
     ctx.font = 'bold 12px -apple-system,Segoe UI,sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    var txt = 'RMS ' + currentDb.toFixed(1) + ' dB   Peak ' + this.peakDb.toFixed(1) + ' dB';
+    var displayRms = currentDb <= this.minDb ? '-∞' : currentDb.toFixed(1);
+    var displayPeak = this.peakDb <= this.minDb ? '-∞' : this.peakDb.toFixed(1);
+    var txt = 'RMS ' + displayRms + ' dBFS   Peak ' + displayPeak + ' dBFS';
     ctx.fillText(txt, 8, h/2);
 };
 
@@ -1481,6 +1671,8 @@ function appendBlobToAccumulatedWaveform(blob) {
         accumulatedWaveform.setSourceSampleRate(audioBuffer.sampleRate);
         var channelData = audioBuffer.getChannelData(0);
         accumulatedWaveform.append(channelData);
+        // 更新 decimation 與來源採樣率顯示
+        gatherAndRenderSpecs();
     }).catch(function(error) {
         console.warn('Unable to decode audio chunk for accumulated waveform.', error);
     });
@@ -1572,7 +1764,10 @@ function playSelectedOrFullAudio() {
         // 創建音訊源並播放
     selectionAudioSource = audioContext.createBufferSource();
         selectionAudioSource.buffer = newBuffer;
-        selectionAudioSource.connect(audioContext.destination);
+    // 聲音輸出
+    selectionAudioSource.connect(audioContext.destination);
+    // 也接入 analyser 以便播放期間 VU Meter 更新
+    try { selectionAudioSource.connect(analyser); } catch(e) { /* ignore */ }
         
         // 開始播放動畫
         var decimationFactor = accumulatedWaveform.decimationFactor;
@@ -2418,6 +2613,8 @@ function stopRecordingCallback() {
 
         // 有可播放錄音後，更新播放按鈕狀態
         updatePlaybackButtonsState();
+        // 最終輸出規格（含 size/duration）
+        gatherAndRenderSpecs();
     });
 
     /*---------------------------------------------------------------
@@ -2603,6 +2800,7 @@ function pausePlayback() {
 if (btnPause) {
     btnPause.addEventListener('click', function(){
         pausePlayback();
+        ensureVUMeterRunning();
     });
 }
 
@@ -2626,6 +2824,7 @@ function stopPlaybackAll() {
 if (btnStopPlayback) {
     btnStopPlayback.addEventListener('click', function(){
         stopPlaybackAll();
+        ensureVUMeterRunning();
     });
 }
 
@@ -2647,6 +2846,7 @@ function jumpToStart() {
 if (btnJumpStart) {
     btnJumpStart.addEventListener('click', function(){
         jumpToStart();
+        ensureVUMeterRunning();
     });
 }
 
@@ -2667,6 +2867,7 @@ function clearSelection() {
 if (btnClearSelection) {
     btnClearSelection.addEventListener('click', function(){
         clearSelection();
+        ensureVUMeterRunning();
     });
 }
 
@@ -2712,46 +2913,41 @@ function startRecording() {
     updatePlaybackButtonsState();
 
     /*---------------------------------------------------------------
-     * 捕獲麥克風並開始錄音
-     * 獲取用戶麥克風權限並初始化 RecordRTC
+     * 先恢復/初始化 AudioContext（確保在使用者手勢中進行）
+     * 之後再請求麥克風，避免 iOS/Safari 因非手勢啟動而失敗
      *--------------------------------------------------------------*/
-    captureMicrophone(function(microphone) {
-        // 初始化 Web Audio API 並等待就緒
-        initializeAudioContext().then(function() {
-            // 將麥克風音頻流設定到主音頻元素
-            audio.srcObject = microphone;
+    initializeAudioContext().then(function(){
+        /*-----------------------------------------------------------
+         * 捕獲麥克風並開始錄音
+         *----------------------------------------------------------*/
+        captureMicrophone(function(microphone) {
+            // 將麥克風音頻流設定到主音頻元素（可選，不自動播放）
+            try { audio.srcObject = microphone; } catch(e) { console.warn('set srcObject failed', e); }
 
-            /*-----------------------------------------------------------
+            /*-------------------------------------------------------
              * 初始化即時波形顯示
-             * 創建 LiveWaveform 實例並連接到麥克風流
-             *----------------------------------------------------------*/
+             *------------------------------------------------------*/
             var liveCanvas = document.getElementById('waveform');
             liveWaveform = liveCanvas ? new LiveWaveform(liveCanvas, analyser) : null;
             if (liveWaveform) {
                 liveWaveform.start(microphone);
             }
 
-            /*-----------------------------------------------------------
-             * 初始化累積波形顯示
-             * 顯示目前為止已錄製的所有音訊波形
-             *----------------------------------------------------------*/
+            /*-------------------------------------------------------
+             * 初始化累積與總覽波形
+             *------------------------------------------------------*/
             var accumulatedCanvas = document.getElementById('accumulated-waveform');
             accumulatedWaveform = accumulatedCanvas ? new AccumulatedWaveform(accumulatedCanvas) : null;
             if (accumulatedCanvas) {
                 bindAccumulatedWaveformInteractions(accumulatedCanvas);
             }
-            
-            /*-----------------------------------------------------------
-             * 初始化全局波形視圖
-             * 顯示整體波形並標示當前觀察區域
-             *----------------------------------------------------------*/
             var overviewCanvas = document.getElementById('overview-waveform');
             overviewWaveform = overviewCanvas && accumulatedWaveform ? new OverviewWaveform(overviewCanvas, accumulatedWaveform) : null;
             if (overviewCanvas) {
                 bindOverviewWaveformInteractions(overviewCanvas);
             }
 
-            // 若 VU Meter 尚未綁定 analyser（第一次錄音前初始化），此處再確保連結並重啟
+            // 綁定/啟動 VU Meter
             var vuCanvas = document.getElementById('vu-meter');
             if (vuCanvas) {
                 if (!vuMeter) {
@@ -2762,75 +2958,70 @@ function startRecording() {
                 vuMeter.start();
             }
 
-            // 根據目前模式，套用對應尺寸與重繪（確保垂直模式立即生效）
+            // 依目前模式調整尺寸
             applyDisplayMode();
 
-            /*-----------------------------------------------------------
-             * 初始化 RecordRTC 錄音器
-             * 設定錄音參數和即時處理回調
-             *----------------------------------------------------------*/
-            recorder = RecordRTC(microphone, {
-                type: 'audio',                    // 錄音類型：音頻
-                mimeType: 'audio/wav',            // 輸出格式：WAV
-                recorderType: StereoAudioRecorder, // 使用立體聲錄音器
-                numberOfAudioChannels: 1,         // 聲道數：單聲道
-                //sampleRate: 48000,             // 採樣率（註解掉使用預設值）
-                //desiredSampRate: 48000,        // 目標採樣率（註解掉使用預設值）
-                bufferSize: 2048,                // 緩衝區大小
-                timeSlice: 20,                   // 時間片段：每20ms觸發一次 ondataavailable，提高更新率
-                
-                /*-------------------------------------------------------
-                 * 即時音頻數據處理回調
-                 * 每1000ms會觸發一次，接收錄音片段
-                 *------------------------------------------------------*/
-                ondataavailable: function(blob) {
-                    /*---------------------------------------------------
-                     * 創建錄音片段顯示容器
-                     * 為每個錄音片段創建獨立的顯示區域和波形
-                     *--------------------------------------------------*/
-                    
-                    // 更新累積波形顯示（移除分段 UI，只保留累積處理）
-                    appendBlobToAccumulatedWaveform(blob);
-                }
-            });
+            /*-------------------------------------------------------
+             * 初始化 RecordRTC 並開始錄音
+             *------------------------------------------------------*/
+            try {
+                recorder = RecordRTC(microphone, {
+                    type: 'audio',
+                    mimeType: 'audio/wav',
+                    recorderType: StereoAudioRecorder,
+                    numberOfAudioChannels: 1,
+                    bufferSize: 2048,
+                    timeSlice: 20,
+                    ondataavailable: function(blob) {
+                        appendBlobToAccumulatedWaveform(blob);
+                        // 進行中即時更新規格（顯示 decimation 成長）
+                        gatherAndRenderSpecs();
+                    }
+                });
 
-            /*-----------------------------------------------------------
-             * 開始錄音並設定時間顯示
-             * 啟動錄音器並開始計時顯示
-             *----------------------------------------------------------*/
-            recorder.startRecording(); // 開始錄音
+                recorder.startRecording();
+                // 剛開始錄音立即與延遲重新抓取 internalRecorder 資訊
+                gatherAndRenderSpecs();
+                setTimeout(gatherAndRenderSpecs, 500);
+                setTimeout(gatherAndRenderSpecs, 1500);
+            } catch(recErr) {
+                console.error('RecordRTC 初始化失敗:', recErr);
+                alert('錄音器初始化失敗，請檢查瀏覽器權限或稍後再試。');
+                // 還原 UI 狀態
+                isCurrentlyRecording = false;
+                is_ready_to_record = true;
+                is_recording = false;
+                toggleButton.classList.remove('recording');
+                toggleButton.innerHTML = '● 開始錄音';
+                // 重新啟用 AGC 切換
+                var agcToggle = document.getElementById('agc-toggle');
+                if (agcToggle) agcToggle.disabled = false;
+                return;
+            }
 
-            dateStarted = new Date().getTime(); // 記錄開始時間
-
-            /*-----------------------------------------------------------
-             * 錄音時間顯示循環
-             * 每秒更新一次錄音時長顯示
-             *----------------------------------------------------------*/
+            // 開始計時顯示
+            dateStarted = new Date().getTime();
             (function looper() {
-                if(!recorder) {
-                    return; // 如果錄音器不存在則停止循環
-                }
-
-                // 更新時長顯示：計算並顯示已錄音時間
-                document.querySelector('h3').innerHTML = 'Recording Duration: ' + 
+                if(!recorder) return;
+                document.querySelector('h3').innerHTML = 'Recording Duration: ' +
                     calculateTimeDuration((new Date().getTime() - dateStarted) / 1000);
-
-                setTimeout(looper, 1000); // 1秒後再次執行
+                setTimeout(looper, 1000);
             })();
 
-            /*-----------------------------------------------------------
-             * 保存麥克風引用
-             * 為停止錄音時釋放麥克風做準備
-             *----------------------------------------------------------*/
-            recorder.microphone = microphone; // 保存麥克風引用
-        }).catch(function(err) {
-            console.error('Failed to initialize AudioContext:', err);
-            alert('無法初始化音頻系統，請重新整理頁面後再試。');
-            // 錯誤時恢復按鈕狀態
-            isCurrentlyRecording = false;
-            toggleButton.classList.remove('recording');
-            toggleButton.innerHTML = '● 開始錄音';
+            // 保存麥克風引用
+            recorder.microphone = microphone;
         });
+    }).catch(function(err){
+        console.error('Failed to initialize AudioContext at gesture:', err);
+        alert('無法啟動音頻系統，請確認瀏覽器允許音訊播放/錄製。');
+        // 錯誤時恢復按鈕狀態
+        isCurrentlyRecording = false;
+        is_ready_to_record = true;
+        is_recording = false;
+        toggleButton.classList.remove('recording');
+        toggleButton.innerHTML = '● 開始錄音';
+        var agcToggle = document.getElementById('agc-toggle');
+        if (agcToggle) agcToggle.disabled = false;
     });
 }
 
@@ -2859,11 +3050,12 @@ function stopRecording() {
     toggleButton.innerHTML = '● 開始錄音';
     // 等待 stopRecordingCallback 生成 blob 後再啟用播放
 
-    // 停止 VU Meter 更新（保留最後畫面供參考）
-    if (vuMeter) {
-        vuMeter.stop();
-    }
+    // 保留 VU Meter 繼續更新（播放階段仍需顯示）
+    // 停止瞬間（Blob 尚未生成）先更新一次，稍後 stopRecordingCallback 會再更新
+    gatherAndRenderSpecs();
 }
+
+// 測試音控制已移除
 
 if (downloadButton) {
     downloadButton.onclick = function() {

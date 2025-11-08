@@ -46,6 +46,22 @@
 </div>
 
 <!-- 波形容器：支援水平與垂直模式 -->
+<!-- 置頂 VU Meter -->
+<div class="vu-container">
+    <canvas id="vu-meter" width="750" height="24" aria-label="VU Meter"></canvas>
+    <details id="recording-specs" class="specs-panel" open>
+        <summary>錄音規格 Recording specs</summary>
+        <div id="audio-specs-content">
+            <div class="spec-line"><span class="label">環境 Environment</span><span class="value" id="spec-env">-</span></div>
+            <div class="spec-line"><span class="label">輸入 Input (MediaTrack)</span><span class="value" id="spec-input">尚未開始錄音</span></div>
+            <div class="spec-line"><span class="label">AudioContext</span><span class="value" id="spec-context">-</span></div>
+            <div class="spec-line"><span class="label">Recorder</span><span class="value" id="spec-recorder">-</span></div>
+            <div class="spec-line"><span class="label">輸出 Output (WAV)</span><span class="value" id="spec-output">-</span></div>
+            <div class="spec-line"><span class="label">顯示 Decimation</span><span class="value" id="spec-decimation">-</span></div>
+        </div>
+    </details>
+    </div>
+
 <div id="waveform-wrapper" class="waveform-wrapper mode-horizontal">
     <div class="waveform-col overview-col">
         <canvas class="wave-canvas" id="overview-waveform" width="750" height="80"></canvas>
@@ -55,9 +71,6 @@
     </div>
     <div class="waveform-col live-col">
         <canvas class="wave-canvas" id="waveform" width="750" height="200"></canvas>
-        <div class="vu-container">
-            <canvas id="vu-meter" width="750" height="24" aria-label="VU Meter"></canvas>
-        </div>
     </div>
 </div>
 
