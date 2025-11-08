@@ -30,6 +30,14 @@
     <small class="agc-hint">關閉可減少錄音啟動延遲，但音量可能較小且不穩定</small>
 </div>
 
+<!-- 前級增益（僅在 AGC 關閉時生效） -->
+<div class="mic-gain-container" id="mic-gain-container">
+    <label for="mic-gain" class="mic-gain-label">前級增益 Mic Gain (AGC 關閉才會套用)</label>
+    <input type="range" id="mic-gain" min="1" max="6" step="0.1" value="2.5" aria-label="Microphone pre-amplification">
+    <span id="mic-gain-value">2.5x</span>
+    <small class="mic-gain-hint">可在開始錄音前調整，改善 iPhone 音量偏小問題。</small>
+</div>
+
 <!-- 錄音與顯示模式控制按鈕區域 -->
 <div class="button-container">
     <button id="btn-toggle-recording" class="recording-toggle">● 開始錄音</button>

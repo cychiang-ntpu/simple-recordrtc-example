@@ -227,6 +227,9 @@ var is_recorded = false;         // 是否已完成錄音
 var audioContext = null; // 音頻上下文（延遲初始化）
 var analyser = null;     // 音頻分析器（延遲初始化）
 var analyserSilencer = null; // 用於避免回授的靜音輸出節點
+var preGainNode = null;      // 前級增益節點（AGC 關閉時可放大）
+var mediaDest = null;        // MediaStreamDestination（供 RecordRTC 使用的處理後串流）
+var micGainUserFactor = 2.5; // 使用者設定的前級增益倍率（預設 2.5x）
 
 // 即時/累積波形顯示變數
 var liveWaveform = null;          // 即時波形顯示器實例
@@ -357,6 +360,10 @@ function gatherAndRenderSpecs() {
                 if (internal.sampleRate) recParts.push('sampleRate=' + internal.sampleRate + (internal.desiredSampRate ? ('->'+internal.desiredSampRate) : ''));
                 if (internal.bufferSize) recParts.push('bufferSize=' + internal.bufferSize);
                 recParts.push('format=WAV PCM 16-bit');
+                if (preGainNode) {
+                    var agcOn = false; try { var agcEl = document.getElementById('agc-toggle'); agcOn = !!(agcEl && agcEl.checked); } catch(e){}
+                    recParts.push('preGain=' + (preGainNode.gain && preGainNode.gain.value ? preGainNode.gain.value.toFixed(2) : '1.00') + (agcOn ? ' (AGC on)' : ''));
+                }
                 specs.recorder = recParts.join(', ');
             } else {
                 specs.recorder = '內部錄音器尚未就緒';
@@ -411,6 +418,19 @@ document.addEventListener('DOMContentLoaded', function(){
     gatherAndRenderSpecs();
     // 嘗試列出麥克風
     populateMicDevices();
+    // 初始化 Mic Gain UI
+    var gainSlider = document.getElementById('mic-gain');
+    var gainValue = document.getElementById('mic-gain-value');
+    if (gainSlider && gainValue) {
+        var renderGain = function(){
+            var v = parseFloat(gainSlider.value);
+            if (!isFinite(v)) v = 2.5;
+            micGainUserFactor = Math.min(6, Math.max(1, v));
+            gainValue.textContent = micGainUserFactor.toFixed(1) + 'x';
+        };
+        gainSlider.addEventListener('input', function(){ renderGain(); });
+        renderGain();
+    }
 });
 
 /*=================================================================
@@ -642,6 +662,15 @@ function initializeAudioContext() {
         }
 
         // 為了讓音訊節點圖保有出口，避免回授的同時保持數據流
+        // 建立前級增益與 MediaStreamDestination（供後續串接與錄音使用）
+        preGainNode = audioContext.createGain();
+        preGainNode.gain.value = 1.0;
+        mediaDest = audioContext.createMediaStreamDestination();
+
+        // 將前級增益輸出到 analyser 與 MediaStreamDestination
+        preGainNode.connect(analyser);
+        preGainNode.connect(mediaDest);
+
         analyserSilencer = audioContext.createGain();
         analyserSilencer.gain.value = 0;
         analyser.connect(analyserSilencer);
@@ -911,9 +940,14 @@ LiveWaveform.prototype.start = function(stream) {
             self.mediaStreamSource.disconnect();
         }
 
-        // 連接麥克風到 analyser
+        // 連接麥克風到前級增益，再送往 analyser/MediaStreamDestination
         self.mediaStreamSource = audioContext.createMediaStreamSource(stream);
-        self.mediaStreamSource.connect(self.analyser);
+        if (preGainNode) {
+            try { self.mediaStreamSource.connect(preGainNode); } catch(e) { console.warn('connect preGainNode failed', e); }
+        } else {
+            // 後援：直接接到 analyser（理論上不會走到這裡）
+            self.mediaStreamSource.connect(self.analyser);
+        }
 
         // 設定 FFT 參數（在連接之後）
         self.analyser.fftSize = 1024;
@@ -1887,6 +1921,12 @@ function captureMicrophone(callback) {
 
     navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
         .then(function(microphone) {
+            // 套用前級增益倍率（僅在 AGC 關閉時）
+            if (!agcEnabled && preGainNode) {
+                preGainNode.gain.value = Math.min(6, Math.max(1, micGainUserFactor));
+            } else if (preGainNode) {
+                preGainNode.gain.value = 1.0;
+            }
             callback(microphone);           // 成功時執行回調
         }).catch(function(error) {
             // 若因指定 deviceId 導致找不到裝置，嘗試退回預設裝置
@@ -3232,7 +3272,9 @@ function startRecording() {
              * 初始化 RecordRTC 並開始錄音
              *------------------------------------------------------*/
             try {
-                recorder = RecordRTC(microphone, {
+                // 若已有處理後的 mediaDest，使用其串流進行錄製以套用前級增益
+                var recordStream = (mediaDest && mediaDest.stream) ? mediaDest.stream : microphone;
+                recorder = RecordRTC(recordStream, {
                     type: 'audio',
                     mimeType: 'audio/wav',
                     recorderType: StereoAudioRecorder,
@@ -3276,7 +3318,8 @@ function startRecording() {
             })();
 
             // 保存麥克風引用
-            recorder.microphone = microphone;
+        // 保留原始麥克風參考（供 specs 顯示 track 設定）
+        recorder.microphone = microphone;
         });
     }).catch(function(err){
         console.error('Failed to initialize AudioContext at gesture:', err);
