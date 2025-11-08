@@ -48,6 +48,24 @@ html, body {
     --transition: 0.3s ease;
 }
 
+/* ================================================================
+ * 水平模式版面（所有裝置共用）
+ * - 僅顯示 overview 與 accumulated，並隱藏 live
+ * - 交換上下順序：累積在上、總覽在下
+ * ================================================================ */
+#waveform-wrapper.mode-horizontal {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    margin: 12px auto;
+}
+
+#waveform-wrapper.mode-horizontal .waveform-col { display: block; }
+#waveform-wrapper.mode-horizontal .accumulated-col { order: 1; }
+#waveform-wrapper.mode-horizontal .overview-col { order: 2; }
+#waveform-wrapper.mode-horizontal .live-col { display: none; }
+
 /* 預設視窗秒數設定區塊 */
 .default-window-container {
     max-width: 1400px;

@@ -25,10 +25,7 @@ var orientationManager = {
         applyDisplayMode();
         // 切換模式時調整提示文字
         updateModeHints();
-        // 若從垂直回到水平，恢復 live 波形繪製
-        if (m === 'horizontal' && liveWaveform && typeof liveWaveform.start === 'function') {
-            try { liveWaveform.start(); } catch(e){}
-        }
+        // 新需求：水平模式也隱藏 live，不再自動恢復
     },
     isVertical: function(){ return this.mode === 'vertical'; }
 };
@@ -67,14 +64,12 @@ function applyDisplayMode(){
             try { liveWaveform.stop(); } catch(e){}
         }
     } else {
-        // 水平模式：回復原先 HTML 設定的寬高 (750 固定寬，個別高度)
-        if(overviewCanvas){ overviewCanvas.width = 750; overviewCanvas.height = 80; }
-        if(accumCanvas){ accumCanvas.width = 750; accumCanvas.height = 140; }
-        if(liveCanvas){ liveCanvas.width = 750; liveCanvas.height = 200; }
-        if(liveWaveform){
-            liveWaveform.width = liveCanvas.width;
-            liveWaveform.height = liveCanvas.height;
-            liveWaveform.canvasContext.clearRect(0,0,liveWaveform.width, liveWaveform.height);
+        // 新水平模式：隱藏 live，同時交換 overview/accumulated 顯示順序（CSS 控制）
+        // 仍使用原寬高設定於 overview 與 accumulated；live 不再顯示也不需重繪
+        if(overviewCanvas){ overviewCanvas.width = 750; overviewCanvas.height = 90; }
+        if(accumCanvas){ accumCanvas.width = 750; accumCanvas.height = 150; }
+        if(liveWaveform && typeof liveWaveform.stop === 'function') {
+            try { liveWaveform.stop(); } catch(e){}
         }
     }
 
@@ -90,11 +85,7 @@ function applyDisplayMode(){
         overviewWaveform.draw();
     }
     if(liveWaveform){
-        // 垂直模式下不重繪 live；水平模式才更新
-        if(!orientationManager.isVertical()){
-            liveWaveform.width = liveCanvas.width;
-            liveWaveform.height = liveCanvas.height;
-        }
+        // 任何模式均不重繪（水平模式新需求亦隱藏 live）
     }
 
     // 調整 VU Meter 畫布像素尺寸以符合當前 CSS 尺寸與 DPR
