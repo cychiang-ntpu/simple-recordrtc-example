@@ -191,8 +191,9 @@ html {
  * ================================================================ */
 #waveform-wrapper.mode-vertical {
     display: grid !important; /* 強制使用 Grid 以避免其他樣式覆蓋 */
-    grid-auto-flow: column;   /* 先塞滿同一列 */
+    grid-auto-flow: dense;   /* 自動填充空格 */
     grid-template-columns: minmax(100px, 28%) 1fr; /* overview | accumulated */
+    grid-template-rows: auto auto; /* 兩行: 第一行波形, 第二行 recording-duration */
     align-items: stretch;
     justify-content: stretch;
     gap: 8px;
@@ -214,8 +215,14 @@ html {
 }
 
 /* 左→右：overview | accumulated（live 在垂直模式隱藏） */
-#waveform-wrapper.mode-vertical .overview-col { min-width: 0; grid-column: 1 / 2; }
-#waveform-wrapper.mode-vertical .accumulated-col { min-width: 0; grid-column: 2 / 3; }
+#waveform-wrapper.mode-vertical .overview-col { min-width: 0; grid-column: 1 / 2; grid-row: 1; }
+#waveform-wrapper.mode-vertical #recording-duration { 
+    grid-column: 1 / -1; 
+    grid-row: 2; 
+    text-align: center; 
+    margin: 8px auto;
+}
+#waveform-wrapper.mode-vertical .accumulated-col { min-width: 0; grid-column: 2 / 3; grid-row: 1; }
 #waveform-wrapper.mode-vertical .live-col { display: none; }
 
 /* 小螢幕比例微調，避免 overview 過窄或造成換行 */
