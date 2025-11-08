@@ -172,31 +172,54 @@ function autoDetectInitialOrientation(){
 }
 autoDetectInitialOrientation();
 
+// Debounce 計時器
+var resizeDebounceTimer = null;
+var orientationDebounceTimer = null;
+
 // 監聽 resize / orientationchange 自動判斷（若使用者未暫停自動）
 var autoOrientationEnabled = true;
 window.addEventListener('resize', function(){
     if(!autoOrientationEnabled) return; // 使用者停用自動偵測
-    var h = window.innerHeight, w = window.innerWidth;
-    var wantVertical = (h > w) && ((h / w) > 1.1);
-    var targetMode = wantVertical ? 'vertical' : 'horizontal';
-    if (orientationManager.mode !== targetMode) {
-        orientationManager.setMode(targetMode);
-        showToast('自動切換為 ' + (targetMode === 'vertical' ? '垂直模式' : '水平模式'));
-    }
-    // 視窗尺寸改變時，同步迷你音量條寬度
-    try { syncMiniLevelWidth(); } catch(e){}
+    
+    // Debounce: 等待 150ms 後才執行，避免頻繁觸發
+    clearTimeout(resizeDebounceTimer);
+    resizeDebounceTimer = setTimeout(function(){
+        try {
+            var h = window.innerHeight, w = window.innerWidth;
+            var wantVertical = (h > w) && ((h / w) > 1.1);
+            var targetMode = wantVertical ? 'vertical' : 'horizontal';
+            if (orientationManager.mode !== targetMode) {
+                orientationManager.setMode(targetMode);
+                showToast('自動切換為 ' + (targetMode === 'vertical' ? '垂直模式' : '水平模式'));
+            }
+            // 視窗尺寸改變時，同步迷你音量條寬度
+            syncMiniLevelWidth();
+        } catch(e){
+            showError('處理視窗大小變更時發生錯誤', e);
+        }
+    }, 150);
 });
+
 window.addEventListener('orientationchange', function(){
     // orientationchange 在部分桌面環境不觸發；行動裝置補強
     if(!autoOrientationEnabled) return;
-    var h = window.innerHeight, w = window.innerWidth;
-    var wantVertical = (h > w) && ((h / w) > 1.1);
-    var targetMode = wantVertical ? 'vertical' : 'horizontal';
-    if (orientationManager.mode !== targetMode) {
-        orientationManager.setMode(targetMode);
-        showToast('自動切換為 ' + (targetMode === 'vertical' ? '垂直模式' : '水平模式'));
-    }
-    try { syncMiniLevelWidth(); } catch(e){}
+    
+    // Debounce: 等待 200ms 讓裝置完成旋轉
+    clearTimeout(orientationDebounceTimer);
+    orientationDebounceTimer = setTimeout(function(){
+        try {
+            var h = window.innerHeight, w = window.innerWidth;
+            var wantVertical = (h > w) && ((h / w) > 1.1);
+            var targetMode = wantVertical ? 'vertical' : 'horizontal';
+            if (orientationManager.mode !== targetMode) {
+                orientationManager.setMode(targetMode);
+                showToast('自動切換為 ' + (targetMode === 'vertical' ? '垂直模式' : '水平模式'));
+            }
+            syncMiniLevelWidth();
+        } catch(e){
+            showError('處理螢幕旋轉時發生錯誤', e);
+        }
+    }, 200);
 });
 
 // 快速按鈕行為
@@ -399,6 +422,38 @@ function showToast(message, opts){
     container.appendChild(item);
     setTimeout(function(){ item.classList.add('out'); }, ttl - 400);
     setTimeout(function(){ try { container.removeChild(item); } catch(e){} }, ttl);
+}
+
+// 統一錯誤處理：顯示錯誤訊息並記錄至 Console
+function showError(message, error){
+    console.error('[Error]', message, error || '');
+    showToast('⚠️ ' + message, {duration: 3500});
+}
+
+// 記憶體限制常數
+var MAX_RECORDING_BYTES = 50 * 1024 * 1024; // 50MB
+var MAX_RECORDING_SECONDS = 10 * 60;        // 10 分鐘
+
+// 檢查錄音記憶體用量
+function checkRecordingMemoryLimit(){
+    if (!usingWorklet || !isCurrentlyRecording) return true;
+    
+    var bytesUsed = pcmTotalSamples * 4; // Float32 = 4 bytes per sample
+    var recordingSeconds = (performance.now() - recordWallStartMs) / 1000;
+    
+    if (bytesUsed > MAX_RECORDING_BYTES) {
+        showError('錄音資料已達 50MB 上限，自動停止錄音');
+        setTimeout(stopRecording, 100);
+        return false;
+    }
+    
+    if (recordingSeconds > MAX_RECORDING_SECONDS) {
+        showError('錄音時間已達 10 分鐘上限，自動停止錄音');
+        setTimeout(stopRecording, 100);
+        return false;
+    }
+    
+    return true;
 }
 
 // 主題套用
@@ -2854,7 +2909,7 @@ function captureMicrophone(callback) {
             var overconstrained = name === 'OverconstrainedError' || name === 'NotFoundError' || name === 'OverconstrainedErrorEvent';
             if (overconstrained && audioConstraints && audioConstraints.deviceId) {
                 console.warn('Specified deviceId not available, falling back to default device.', error);
-            showToast('選擇的麥克風無法使用，已改用預設裝置。');
+                showToast('選擇的麥克風無法使用，已改用預設裝置。');
                 var fallbackConstraints = {
                     echoCancellation: false,
                     noiseSuppression: false,
@@ -2862,14 +2917,22 @@ function captureMicrophone(callback) {
                 };
                 lastAudioConstraintsUsed = fallbackConstraints;
                 return navigator.mediaDevices.getUserMedia({ audio: fallbackConstraints, video: false })
-                    .then(function(m){ callback(m); })
+                    .then(function(m){ 
+                        currentMicStream = m;
+                        if (!agcEnabled && preGainNode) {
+                            preGainNode.gain.value = Math.min(6, Math.max(1, micGainUserFactor));
+                        } else if (preGainNode) {
+                            preGainNode.gain.value = 1.0;
+                        }
+                        callback(m); 
+                    })
                     .catch(function(err){
-                        alert('Unable to capture your microphone. Please check console logs.');
+                        showError('無法捕獲麥克風（預設裝置）', err);
                         console.error(err);
                     });
             }
             // 其它錯誤：顯示錯誤訊息並記錄到控制台
-            alert('Unable to capture your microphone. Please check console logs.');
+            showError('無法捕獲麥克風，請檢查權限設定', error);
             console.error(error);
         });
 }
@@ -4289,6 +4352,11 @@ function startRecording() {
                         var data = ev.data || {};
                         if (data.type === 'pcm' && data.buffer && data.length) {
                             try {
+                                // 檢查記憶體限制（在新增資料前）
+                                if (!checkRecordingMemoryLimit()) {
+                                    return; // 已達上限，停止處理新資料
+                                }
+                                
                                 var f32 = new Float32Array(data.buffer, 0, data.length);
                                 // 複製出獨立緩衝避免之後被覆寫
                                 var copy = new Float32Array(f32.length);
@@ -4304,7 +4372,9 @@ function startRecording() {
                                     }
                                     accumulatedWaveform.append(copy);
                                 }
-                            } catch(e) { console.warn('pcm onmessage parse failed', e); }
+                            } catch(e) { 
+                                showError('處理錄音資料時發生錯誤', e);
+                            }
                         }
                     };
                     // 規格更新
@@ -4338,8 +4408,7 @@ function startRecording() {
                     setTimeout(gatherAndRenderSpecs, 500);
                     setTimeout(gatherAndRenderSpecs, 1500);
                 } catch(recErr) {
-                    console.error('RecordRTC 初始化失敗:', recErr);
-                    alert('錄音器初始化失敗，請檢查瀏覽器權限或稍後再試。');
+                    showError('RecordRTC 初始化失敗', recErr);
                     isCurrentlyRecording = false;
                     is_ready_to_record = true;
                     is_recording = false;
@@ -4365,8 +4434,7 @@ function startRecording() {
             if (recorder) recorder.microphone = microphone;
         });
     }).catch(function(err){
-        console.error('Failed to initialize AudioContext at gesture:', err);
-        alert('無法啟動音頻系統，請確認瀏覽器允許音訊播放/錄製。');
+        showError('無法啟動音頻系統', err);
         // 錯誤時恢復按鈕狀態
         isCurrentlyRecording = false;
         is_ready_to_record = true;
