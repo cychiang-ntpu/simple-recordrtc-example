@@ -63,17 +63,31 @@ function applyDisplayMode(){
             var targetH = Math.round(window.innerHeight * 0.80); // 80vh 高度
             [overviewCanvas, accumCanvas].forEach(function(c){
                 if(!c) return;
-                var cssW = c.clientWidth || 240; // 需在已套用 grid 後再量測
-                c.width = Math.round(cssW * dpr);
-                c.height = Math.round(targetH * dpr);
-                c.style.height = '100%';
+                // 檢查 canvas 是否已轉移控制權（如果是就跳過 resize）
+                try {
+                    var cssW = c.clientWidth || 240; // 需在已套用 grid 後再量測
+                    c.width = Math.round(cssW * dpr);
+                    c.height = Math.round(targetH * dpr);
+                    c.style.height = '100%';
+                } catch(e) {
+                    // Canvas 已轉移控制權，無法調整大小，靜默跳過
+                }
             });
             if (liveWaveform && typeof liveWaveform.stop === 'function') {
                 try { liveWaveform.stop(); } catch(e){}
             }
         } else {
-            if(overviewCanvas){ overviewCanvas.width = 750; overviewCanvas.height = 90; }
-            if(accumCanvas){ accumCanvas.width = 750; accumCanvas.height = 150; }
+            // 水平模式
+            try {
+                if(overviewCanvas){ overviewCanvas.width = 750; overviewCanvas.height = 90; }
+            } catch(e) {
+                // Canvas 已轉移控制權，無法調整大小
+            }
+            try {
+                if(accumCanvas){ accumCanvas.width = 750; accumCanvas.height = 150; }
+            } catch(e) {
+                // Canvas 已轉移控制權，無法調整大小
+            }
             if(liveWaveform && typeof liveWaveform.stop === 'function') {
                 try { liveWaveform.stop(); } catch(e){}
             }
@@ -119,11 +133,15 @@ function applyDisplayMode(){
 
     // 調整 VU Meter 畫布像素尺寸以符合當前 CSS 尺寸與 DPR
     if (vuCanvas) {
-        var dprVU = window.devicePixelRatio || 1;
-        var cssVW = vuCanvas.clientWidth || 300;
-        var cssVH = vuCanvas.clientHeight || 24;
-        vuCanvas.width = Math.round(cssVW * dprVU);
-        vuCanvas.height = Math.round(cssVH * dprVU);
+        try {
+            var dprVU = window.devicePixelRatio || 1;
+            var cssVW = vuCanvas.clientWidth || 300;
+            var cssVH = vuCanvas.clientHeight || 24;
+            vuCanvas.width = Math.round(cssVW * dprVU);
+            vuCanvas.height = Math.round(cssVH * dprVU);
+        } catch(e) {
+            // Canvas 已轉移控制權，無法調整大小
+        }
         if (vuMeter && typeof vuMeter.resize === 'function') {
             vuMeter.resize();
             if (typeof vuMeter.draw === 'function') {
@@ -1453,7 +1471,14 @@ VUMeter.prototype.update = function() {
     this.levelDb = levels.rmsDb;
     this.peakDb = levels.peakDb;
 
+    // 臨時調試：每秒記錄一次
+    if (!this._lastLogTime) this._lastLogTime = 0;
     var now = performance.now();
+    if (now - this._lastLogTime > 1000) {
+        console.log('[VU Meter Debug] RMS:', this.levelDb.toFixed(1), 'dB, Peak:', this.peakDb.toFixed(1), 'dB, animationId:', this.animationId);
+        this._lastLogTime = now;
+    }
+
     // 更新 peak hold
     if (this.peakDb > this.holdPeakDb + 0.5) { // 新峰值（加點 hysteresis）
         this.holdPeakDb = this.peakDb;
@@ -1473,12 +1498,24 @@ VUMeter.prototype.update = function() {
 };
 
 VUMeter.prototype.start = function() {
+    // 先停止舊的動畫循環（如果有的話）
+    this.stop();
+    
+    // 確保 buffer 大小與 analyser 同步
+    if (this.analyser) {
+        var required = this.analyser.fftSize || 2048;
+        if (this.timeData.length !== required) {
+            this.bufferLength = required;
+            this.timeData = new Float32Array(required);
+        }
+    }
+    
     var self = this;
     function loop(){
         self.update();
         self.animationId = requestAnimationFrame(loop);
     }
-    if (!this.animationId) loop();
+    loop(); // 無條件啟動新的循環
 };
 
 VUMeter.prototype.stop = function() {
@@ -1681,7 +1718,7 @@ LiveWaveform.prototype.draw = function() {
  */
 function AccumulatedWaveform(canvas) {
     this.canvas = canvas;
-    this.canvasContext = canvas.getContext('2d');
+    this.canvasContext = null;  // 延遲初始化，先嘗試 OffscreenCanvas
     this.width = canvas.width;
     this.height = canvas.height;
 
@@ -1709,17 +1746,17 @@ function AccumulatedWaveform(canvas) {
     this.rawViewStart = 0;                 // 原始樣本座標的視窗起點
     this.rawVisibleRaw = 0;                // 原始樣本座標的視窗長度（raw samples）
 
-    this.clear();
-    setAccumulatedControlsEnabled(false);
-
     // OffscreenCanvas + Worker 繪圖（可用時啟用）
     this._useWorker = false;
     this._worker = null;
     this._appendBatchMin = [];
     this._appendBatchMax = [];
     this._appendFlushScheduled = false;
-    try {
-        if (canvas.transferControlToOffscreen && window.Worker) {
+    
+    // 嘗試使用 OffscreenCanvas + Worker
+    // 注意：canvas.transferControlToOffscreen() 只能在 canvas 沒有 rendering context 時呼叫一次
+    if (canvas.transferControlToOffscreen && window.Worker) {
+        try {
             var off = canvas.transferControlToOffscreen();
             this._worker = new Worker('assets/js/wf-worker.js');
             this._useWorker = true;
@@ -1746,8 +1783,25 @@ function AccumulatedWaveform(canvas) {
                     try { gatherAndRenderSpecs(); } catch(e){}
                 }
             };
+        } catch(e) { 
+            // transferControlToOffscreen 失敗（可能 canvas 已有 context 或已轉移），回退到主執行緒繪圖
+            this._useWorker = false;
         }
-    } catch(e) { console.warn('OffscreenCanvas/Worker 初始化失敗，回退主執行緒繪圖', e); }
+    }
+    
+    // 如果沒有使用 Worker，嘗試獲取 2D context
+    if (!this._useWorker) {
+        try {
+            this.canvasContext = canvas.getContext('2d');
+        } catch(e) {
+            // Canvas 已轉移控制權，無法獲取 context
+            // 這種情況下無法進行主執行緒繪圖，保持 canvasContext 為 null
+            console.warn('無法獲取 canvas context（canvas 已轉移控制權），波形繪製將被跳過');
+        }
+    }
+    
+    this.clear();
+    setAccumulatedControlsEnabled(false);
 }
 
 /**
@@ -1758,6 +1812,7 @@ AccumulatedWaveform.prototype.clear = function() {
         this._worker.postMessage({ type: 'reset' });
         return;
     }
+    if (!this.canvasContext) return; // 如果沒有 context 就跳過
     this.canvasContext.clearRect(0, 0, this.width, this.height);
     this.canvasContext.fillStyle = '#f0f0f0';
     this.canvasContext.fillRect(0, 0, this.width, this.height);
@@ -2609,15 +2664,16 @@ AccumulatedWaveform.prototype._updatePlaybackPosition = function() {
  */
 function OverviewWaveform(canvas, accumulatedWaveform) {
     this.canvas = canvas;
-    this.canvasContext = canvas.getContext('2d');
+    this.canvasContext = null;  // 延遲初始化
     this.width = canvas.width;
     this.height = canvas.height;
     this.accumulatedWaveform = accumulatedWaveform;
     this._useWorker = false;
     this._workerRef = null;
+    
     // 若累積波形已啟用 Worker，則將 Overview Canvas 也移轉至同一個 Worker
-    try {
-        if (accumulatedWaveform && accumulatedWaveform._useWorker && accumulatedWaveform._worker && canvas.transferControlToOffscreen) {
+    if (accumulatedWaveform && accumulatedWaveform._useWorker && accumulatedWaveform._worker && canvas.transferControlToOffscreen) {
+        try {
             var off = canvas.transferControlToOffscreen();
             accumulatedWaveform._worker.postMessage({
                 type:'initOverview',
@@ -2627,8 +2683,21 @@ function OverviewWaveform(canvas, accumulatedWaveform) {
             }, [off]);
             this._useWorker = true;
             this._workerRef = accumulatedWaveform._worker;
+        } catch(e) {
+            // transferControlToOffscreen 失敗，回退到主執行緒繪圖
+            this._useWorker = false;
         }
-    } catch(e){ console.warn('Overview Offscreen 轉移失敗，改用主執行緒繪圖', e); }
+    }
+    
+    // 如果沒有使用 Worker，嘗試獲取 2D context
+    if (!this._useWorker) {
+        try {
+            this.canvasContext = canvas.getContext('2d');
+        } catch(e) {
+            // Canvas 已轉移控制權，無法獲取 context
+            console.warn('無法獲取 overview canvas context（canvas 已轉移控制權），波形繪製將被跳過');
+        }
+    }
     
     this.clear();
 }
@@ -2641,6 +2710,7 @@ OverviewWaveform.prototype.clear = function() {
         // 交由 worker 清空（在下次 draw 時一併處理）
         return;
     }
+    if (!this.canvasContext) return; // 如果沒有 context 就跳過
     this.canvasContext.clearRect(0, 0, this.width, this.height);
     this.canvasContext.fillStyle = '#f5f5f5';
     this.canvasContext.fillRect(0, 0, this.width, this.height);
@@ -4284,6 +4354,15 @@ function startRecording() {
      * 之後再請求麥克風，避免 iOS/Safari 因非手勢啟動而失敗
      *--------------------------------------------------------------*/
     initializeAudioContext().then(function(){
+        // 確保 preGainNode 連接到 analyser（可能在上次錄音結束時被斷開）
+        try {
+            if (preGainNode && analyser) {
+                preGainNode.connect(analyser);
+            }
+        } catch(e) {
+            // 如果已經連接會拋出錯誤，靜默忽略
+        }
+        
         /*-----------------------------------------------------------
          * 捕獲麥克風並開始錄音
          *----------------------------------------------------------*/
@@ -4304,14 +4383,48 @@ function startRecording() {
              * 初始化累積與總覽波形
              *------------------------------------------------------*/
             var accumulatedCanvas = document.getElementById('accumulated-waveform');
-            accumulatedWaveform = accumulatedCanvas ? new AccumulatedWaveform(accumulatedCanvas) : null;
+            
+            // 如果已存在 accumulatedWaveform，重用它（重置狀態）
+            if (!accumulatedWaveform && accumulatedCanvas) {
+                accumulatedWaveform = new AccumulatedWaveform(accumulatedCanvas);
+            }
+            
+            // 重置累積波形狀態（清空數據）
+            if (accumulatedWaveform) {
+                accumulatedWaveform.sampleMin = [];
+                accumulatedWaveform.sampleMax = [];
+                accumulatedWaveform.sampleCount = 0;
+                accumulatedWaveform.zoomFactor = 1;
+                accumulatedWaveform.viewStart = 0;
+                accumulatedWaveform.isAutoScroll = true;
+                accumulatedWaveform.playbackPosition = 0;
+                accumulatedWaveform.isPlaying = false;
+                if (accumulatedWaveform._useWorker && accumulatedWaveform._worker) {
+                    // 通知 worker 重置
+                    accumulatedWaveform._worker.postMessage({ type: 'reset' });
+                }
+                accumulatedWaveform.clear();
+            }
+            
             if (accumulatedCanvas) {
                 bindAccumulatedWaveformInteractions(accumulatedCanvas);
                 // 初始化 Raw 視窗縮放偏好
                 try { if (typeof accumulatedWaveform.setRawZoomMode === 'function') accumulatedWaveform.setRawZoomMode(rawZoomPref); } catch(e){}
             }
+            
             var overviewCanvas = document.getElementById('overview-waveform');
-            overviewWaveform = overviewCanvas && accumulatedWaveform ? new OverviewWaveform(overviewCanvas, accumulatedWaveform) : null;
+            
+            // 如果已存在 overviewWaveform，重用它
+            if (!overviewWaveform && overviewCanvas && accumulatedWaveform) {
+                overviewWaveform = new OverviewWaveform(overviewCanvas, accumulatedWaveform);
+            }
+            
+            // 更新 overviewWaveform 的引用並清空
+            if (overviewWaveform && accumulatedWaveform) {
+                overviewWaveform.accumulatedWaveform = accumulatedWaveform;
+                overviewWaveform.clear();
+            }
+            
             if (overviewCanvas) {
                 bindOverviewWaveformInteractions(overviewCanvas);
             }
@@ -4322,9 +4435,31 @@ function startRecording() {
                 if (!vuMeter) {
                     vuMeter = new VUMeter(vuCanvas, analyser);
                 } else {
+                    // 停止舊的動畫循環
+                    vuMeter.stop();
+                    // 更新 analyser 引用
                     vuMeter.analyser = analyser;
+                    // 確保 canvas context 有效（重新獲取）
+                    try {
+                        vuMeter.ctx = vuCanvas.getContext('2d');
+                    } catch(e) {
+                        console.warn('重新獲取 VU Meter canvas context 失敗', e);
+                    }
+                    // 重置狀態
+                    vuMeter.levelDb = -90;
+                    vuMeter.peakDb = -90;
+                    vuMeter.holdPeakDb = -90;
+                    vuMeter.lastPeakTime = 0;
                 }
                 vuMeter.start();
+            }
+
+            // 重新定位 mini-level 元素（確保每次錄音都正確顯示）
+            try { 
+                placeMiniLevel(); 
+                syncMiniLevelWidth(); 
+            } catch(e) { 
+                console.warn('重新定位 mini-level 失敗', e); 
             }
 
             // 依目前模式調整尺寸
