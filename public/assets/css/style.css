@@ -25,6 +25,73 @@ html, body {
     text-size-adjust: 100%;
 }
 
+/* CSS 變數：統一色彩與間距，便於 RWD 調整 */
+:root {
+    --color-bg: #ffffff;
+    --color-bg-alt: #f7fafc;
+    --color-bg-soft: #edf2f7;
+    --color-border: #e2e8f0;
+    --color-border-strong: #cbd5e0;
+    --color-text: #2d3748;
+    --color-text-muted: #718096;
+    --color-accent: #667eea;
+    --color-accent-alt: #764ba2;
+    --color-success: #4CAF50;
+    --color-danger: #f44336;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 15px;
+    --shadow-sm: 0 2px 4px rgba(0,0,0,0.06);
+    --shadow-md: 0 6px 12px rgba(0,0,0,0.10);
+    --shadow-lg: 0 12px 24px rgba(0,0,0,0.18);
+    --transition-fast: 0.15s ease;
+    --transition: 0.3s ease;
+}
+
+/* 預設視窗秒數設定區塊 */
+.default-window-container {
+    max-width: 1400px;
+    margin: 12px auto 0;
+    padding: 10px 14px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    box-shadow: var(--shadow-sm);
+    font-size: 14px;
+}
+.default-window-label { font-weight:600; color: var(--color-text); }
+#default-window-seconds {
+    width: 90px;
+    padding: 6px 8px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-alt);
+    font-size: 14px;
+}
+#default-window-seconds:focus { outline:2px solid var(--color-accent); }
+#btn-reset-window-seconds {
+    padding: 6px 12px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(135deg,var(--color-accent) 0%, var(--color-accent-alt) 100%);
+    color:#fff;
+    font-weight:600;
+    cursor:pointer;
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition-fast);
+}
+#btn-reset-window-seconds:hover { filter: brightness(1.08); box-shadow: var(--shadow-md); }
+#btn-reset-window-seconds:active { filter: brightness(.92); }
+.default-window-hint { flex: 1 1 100%; font-size:12px; color: var(--color-text-muted); }
+
+/* 可視範圍秒數指示 */
+.waveform-toolbar .window-indicator { font-size:12px; color: var(--color-text); background: rgba(255,255,255,0.7); padding:4px 10px; border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); }
+#visible-window-seconds { color: var(--color-accent-alt); }
+
 html {
     /* 防止雙擊縮放 */
     -webkit-touch-callout: none;

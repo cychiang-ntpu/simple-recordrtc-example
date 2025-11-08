@@ -230,6 +230,7 @@ var analyserSilencer = null; // 用於避免回授的靜音輸出節點
 var preGainNode = null;      // 前級增益節點（AGC 關閉時可放大）
 var mediaDest = null;        // MediaStreamDestination（供 RecordRTC 使用的處理後串流）
 var micGainUserFactor = 2.5; // 使用者設定的前級增益倍率（預設 2.5x）
+var defaultWindowSeconds = parseFloat(localStorage.getItem('defaultWindowSeconds') || '1.0'); // 使用者設定的預設視窗秒數
 
 // 即時/累積波形顯示變數
 var liveWaveform = null;          // 即時波形顯示器實例
@@ -431,7 +432,52 @@ document.addEventListener('DOMContentLoaded', function(){
         gainSlider.addEventListener('input', function(){ renderGain(); });
         renderGain();
     }
+    // 初始化 預設視窗秒數 UI
+    var windowSecInput = document.getElementById('default-window-seconds');
+    var windowSecReset = document.getElementById('btn-reset-window-seconds');
+    if (windowSecInput) {
+        var saved = parseFloat(localStorage.getItem('defaultWindowSeconds'));
+        if (isFinite(saved) && saved > 0) {
+            defaultWindowSeconds = saved;
+            try { windowSecInput.value = String(saved); } catch(e){}
+        } else {
+            defaultWindowSeconds = 1.0;
+        }
+        function applyWindowSeconds(v){
+            if (!isFinite(v) || v <= 0) v = 1.0;
+            v = Math.max(0.1, Math.min(30, v));
+            defaultWindowSeconds = v;
+            try { windowSecInput.value = String(v); } catch(e){}
+            localStorage.setItem('defaultWindowSeconds', String(v));
+            showToast('預設視窗已設定為 ' + v.toFixed(1) + ' 秒');
+            // 立即更新可視範圍顯示（不強制重繪）
+            updateVisibleWindowIndicator();
+        }
+        windowSecInput.addEventListener('change', function(){
+            var v = parseFloat(windowSecInput.value);
+            applyWindowSeconds(v);
+        });
+        if (windowSecReset) {
+            windowSecReset.addEventListener('click', function(){ applyWindowSeconds(1.0); });
+        }
+    }
 });
+
+// 更新「可視範圍秒數」指示
+function updateVisibleWindowIndicator(){
+    var el = document.getElementById('visible-window-seconds');
+    if (!el) return;
+    try {
+        if (!accumulatedWaveform || !accumulatedWaveform.sampleCount) {
+            el.textContent = '-';
+            return;
+        }
+        var effRate = (accumulatedWaveform.sourceSampleRate || (audioContext ? audioContext.sampleRate : 48000)) / Math.max(1, accumulatedWaveform.decimationFactor || 1);
+        var vis = accumulatedWaveform.getVisibleSamples();
+        var secs = vis > 0 && effRate > 0 ? (vis / effRate) : 0;
+        el.textContent = secs.toFixed(2) + 's';
+    } catch(e){ try { el.textContent = '-'; } catch(_){} }
+}
 
 /*=================================================================
  * 麥克風裝置列舉與切換
@@ -1251,6 +1297,59 @@ AccumulatedWaveform.prototype.draw = function() {
     var primarySpan = isVertical ? height : width; // 主時間軸長度（垂直用高度、水平用寬度）
     var samplesPerPixel = visibleSamples / primarySpan;
 
+    // 時間刻度：根據可視範圍時間動態決定步距
+    try {
+        var effRateA = (this.sourceSampleRate || (audioContext ? audioContext.sampleRate : 48000)) / Math.max(1, this.decimationFactor || 1);
+        if (effRateA > 0) {
+            var visibleSecs = visibleSamples / effRateA;
+            var startSecs = startSample / effRateA;
+            var targetTicks = 8; // 期望約 8 個刻度
+            var niceSteps = [0.01,0.02,0.05,0.1,0.2,0.5,1,2,5,10,20,30,60,120,300,600];
+            var step = niceSteps[0];
+            for (var si = 0; si < niceSteps.length; si++) {
+                var cStep = niceSteps[si];
+                if ((visibleSecs / cStep) <= targetTicks) { step = cStep; break; }
+            }
+            var firstTick = Math.floor(startSecs / step) * step;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+            ctx.lineWidth = 1;
+            ctx.fillStyle = '#666';
+            ctx.font = '10px -apple-system,Segoe UI,sans-serif';
+            ctx.textAlign = isVertical ? 'left' : 'center';
+            ctx.textBaseline = isVertical ? 'middle' : 'top';
+            var lastLabelPos = -1e9;
+            // 依視窗大小與目標刻度數動態設定最小間距與字體
+            var dynamicGap = Math.max(28, Math.min(80, Math.round((isVertical ? height : width) / Math.max(6, Math.min(12, visibleSecs / step)))));
+            var minLabelGapPx = dynamicGap; // 動態最小標籤間距
+            // 動態字體大小（10~13px）
+            var fontPx = Math.max(10, Math.min(13, Math.round((isVertical ? width : height) / 28)));
+            ctx.font = fontPx + 'px -apple-system,Segoe UI,sans-serif';
+            for (var t = firstTick; t <= startSecs + visibleSecs + 1e-6; t += step) {
+                var ratio = (t - startSecs) / visibleSecs;
+                if (ratio < 0 || ratio > 1) continue;
+                if (!isVertical) {
+                    var xTick = Math.round(ratio * width) + 0.5;
+                    ctx.beginPath(); ctx.moveTo(xTick, 0); ctx.lineTo(xTick, height); ctx.stroke();
+                    var label = t.toFixed(step >= 1 ? 0 : (step >= 0.1 ? 1 : 2)) + 's';
+                    if (xTick - lastLabelPos >= minLabelGapPx) {
+                        ctx.fillText(label, xTick, 2);
+                        lastLabelPos = xTick;
+                    }
+                } else {
+                    var yTick = Math.round(ratio * height) + 0.5;
+                    ctx.beginPath(); ctx.moveTo(0, yTick); ctx.lineTo(width, yTick); ctx.stroke();
+                    var labelV = t.toFixed(step >= 1 ? 0 : (step >= 0.1 ? 1 : 2)) + 's';
+                    if (yTick - lastLabelPos >= minLabelGapPx) {
+                        ctx.fillText(labelV, 4, yTick);
+                        lastLabelPos = yTick;
+                    }
+                }
+            }
+            ctx.restore();
+        }
+    } catch(e) { /* ignore tick errors */ }
+
     ctx.strokeStyle = '#1E88E5';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -1402,12 +1501,59 @@ AccumulatedWaveform.prototype.draw = function() {
                 ctx.strokeStyle = '#FF0000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(playbackX, 0); ctx.lineTo(playbackX, height); ctx.stroke();
                 ctx.fillStyle='#FF0000'; ctx.beginPath(); ctx.moveTo(playbackX,0); ctx.lineTo(playbackX-6,10); ctx.lineTo(playbackX+6,10); ctx.closePath(); ctx.fill();
                 ctx.beginPath(); ctx.moveTo(playbackX,height); ctx.lineTo(playbackX-6,height-10); ctx.lineTo(playbackX+6,height-10); ctx.closePath(); ctx.fill();
+                // 時間浮標（水平模式：上方）
+                try {
+                    var effRateFloat = (this.sourceSampleRate || (audioContext ? audioContext.sampleRate : 48000)) / Math.max(1, this.decimationFactor || 1);
+                    if (effRateFloat > 0) {
+                        var absSeconds = this.playbackPosition / effRateFloat; // 已含 decimation
+                        var labelTxt = absSeconds.toFixed(absSeconds >= 10 ? 2 : 3) + 's';
+                        var padX = 6, padY = 3;
+                        ctx.font = '11px -apple-system,Segoe UI,sans-serif';
+                        var textW = ctx.measureText(labelTxt).width;
+                        var boxW = textW + padX*2;
+                        var boxH = 16;
+                        var boxX = Math.min(Math.max(playbackX - boxW/2, 2), width - boxW - 2);
+                        var boxY = 2;
+                        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                        ctx.strokeStyle = '#FF0000';
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.roundRect ? ctx.roundRect(boxX, boxY, boxW, boxH, 4) : ctx.rect(boxX, boxY, boxW, boxH);
+                        ctx.fill(); ctx.stroke();
+                        ctx.fillStyle = '#c00';
+                        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                        ctx.fillText(labelTxt, boxX + boxW/2, boxY + boxH/2);
+                    }
+                } catch(e){}
             } else {
                 var playbackY = ((this.playbackPosition - startSample) / visibleSamples) * height;
                 ctx.strokeStyle='#FF0000'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0, playbackY); ctx.lineTo(width, playbackY); ctx.stroke();
                 // 左右三角形指示器
                 ctx.fillStyle='#FF0000'; ctx.beginPath(); ctx.moveTo(0, playbackY); ctx.lineTo(10, playbackY-6); ctx.lineTo(10, playbackY+6); ctx.closePath(); ctx.fill();
                 ctx.beginPath(); ctx.moveTo(width, playbackY); ctx.lineTo(width-10, playbackY-6); ctx.lineTo(width-10, playbackY+6); ctx.closePath(); ctx.fill();
+                // 時間浮標（垂直模式：右側）
+                try {
+                    var effRateFloatV = (this.sourceSampleRate || (audioContext ? audioContext.sampleRate : 48000)) / Math.max(1, this.decimationFactor || 1);
+                    if (effRateFloatV > 0) {
+                        var absSecV = this.playbackPosition / effRateFloatV;
+                        var labelTxtV = absSecV.toFixed(absSecV >= 10 ? 2 : 3) + 's';
+                        ctx.font = '11px -apple-system,Segoe UI,sans-serif';
+                        var tW = ctx.measureText(labelTxtV).width;
+                        var padXv = 6, padYv = 3;
+                        var boxWv = tW + padXv*2;
+                        var boxHv = 16;
+                        var boxXv = width - boxWv - 2;
+                        var boxYv = Math.min(Math.max(playbackY - boxHv/2, 2), height - boxHv - 2);
+                        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                        ctx.strokeStyle = '#FF0000'; ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.roundRect ? ctx.roundRect(boxXv, boxYv, boxWv, boxHv, 4) : ctx.rect(boxXv, boxYv, boxWv, boxHv);
+                        ctx.fill(); ctx.stroke();
+                        ctx.fillStyle = '#c00';
+                        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                        ctx.fillText(labelTxtV, boxXv + boxWv/2, boxYv + boxHv/2);
+                    }
+                } catch(e){}
             }
         }
     }
@@ -1416,6 +1562,8 @@ AccumulatedWaveform.prototype.draw = function() {
     if (overviewWaveform) {
         overviewWaveform.draw();
     }
+    // 更新可視範圍秒數顯示
+    try { updateVisibleWindowIndicator(); } catch(e){}
 };
 
 /**
@@ -1780,6 +1928,55 @@ OverviewWaveform.prototype.draw = function() {
     var centerAxis = isVertical ? width / 2 : height / 2;
     var primarySpan = isVertical ? height : width; // 時間軸投影長度
     var samplesPerPixel = sampleCount / primarySpan;
+
+    // 整段總時間刻度
+    try {
+        var effRateO = (this.accumulatedWaveform.sourceSampleRate || (audioContext ? audioContext.sampleRate : 48000)) / Math.max(1, this.accumulatedWaveform.decimationFactor || 1);
+        if (effRateO > 0) {
+            var totalSecs = sampleCount / effRateO;
+            var targetTicks = 8;
+            var niceSteps = [0.01,0.02,0.05,0.1,0.2,0.5,1,2,5,10,20,30,60,120,300,600];
+            var step = niceSteps[0];
+            for (var si = 0; si < niceSteps.length; si++) {
+                var cStep = niceSteps[si];
+                if ((totalSecs / cStep) <= targetTicks) { step = cStep; break; }
+            }
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+            ctx.lineWidth = 1;
+            ctx.fillStyle = '#555';
+            ctx.font = '10px -apple-system,Segoe UI,sans-serif';
+            ctx.textAlign = isVertical ? 'left' : 'center';
+            ctx.textBaseline = isVertical ? 'middle' : 'top';
+            var lastLabelPosAll = -1e9;
+            // 動態計算 Overview 標籤間距與字體大小
+            var dynamicGapO = Math.max(28, Math.min(80, Math.round((isVertical ? height : width) / Math.max(6, Math.min(12, totalSecs / step)))));
+            var minLabelGapPxAll = dynamicGapO;
+            var fontPxAll = Math.max(10, Math.min(13, Math.round((isVertical ? width : height) / 28)));
+            ctx.font = fontPxAll + 'px -apple-system,Segoe UI,sans-serif';
+            for (var t = 0; t <= totalSecs + 1e-6; t += step) {
+                var ratio = t / totalSecs;
+                if (!isVertical) {
+                    var xTick = Math.round(ratio * width) + 0.5;
+                    ctx.beginPath(); ctx.moveTo(xTick,0); ctx.lineTo(xTick,height); ctx.stroke();
+                    var label = t.toFixed(step >= 1 ? 0 : (step >= 0.1 ? 1 : 2)) + 's';
+                    if (xTick - lastLabelPosAll >= minLabelGapPxAll) {
+                        ctx.fillText(label, xTick, 2);
+                        lastLabelPosAll = xTick;
+                    }
+                } else {
+                    var yTick = Math.round(ratio * height) + 0.5;
+                    ctx.beginPath(); ctx.moveTo(0,yTick); ctx.lineTo(width,yTick); ctx.stroke();
+                    var labelV = t.toFixed(step >= 1 ? 0 : (step >= 0.1 ? 1 : 2)) + 's';
+                    if (yTick - lastLabelPosAll >= minLabelGapPxAll) {
+                        ctx.fillText(labelV, 4, yTick);
+                        lastLabelPosAll = yTick;
+                    }
+                }
+            }
+            ctx.restore();
+        }
+    } catch(e) { /* ignore ticks */ }
     ctx.strokeStyle = '#9E9E9E'; ctx.lineWidth = 1; ctx.beginPath();
     if (!isVertical) {
         // 原水平總覽
@@ -2747,28 +2944,33 @@ function bindOverviewWaveformInteractions(canvas) {
             resizeStartY = clickY;
             resizeStartViewStart = accumulatedWaveform.viewStart;
             resizeStartVisibleSamples = accumulatedWaveform.getVisibleSamples();
-        } else {
-            isResizing = false;
-            resizeEdge = null;
-            isInViewWindow = isInsideViewWindow(event.clientX, event.clientY);
-            
-            // 如果點擊在視窗外，立即跳轉到該位置
-            if (!isInViewWindow) {
+            } else {
+                isResizing = false;
+                resizeEdge = null;
+                isInViewWindow = isInsideViewWindow(event.clientX, event.clientY);
+
                 var clickRatio = isVertical ? (clickY / rect.height) : (clickX / rect.width);
                 var targetSample = Math.floor(clickRatio * accumulatedWaveform.sampleCount);
-                var visibleSamples = accumulatedWaveform.getVisibleSamples();
-                // 先建立 overview 預設選取：0.2 秒
                 var effRateO = (accumulatedWaveform.sourceSampleRate || 48000) / Math.max(1, accumulatedWaveform.decimationFactor || 1);
-                var minSamplesO = Math.max(1, Math.ceil(0.2 * effRateO));
-                var half = Math.floor(minSamplesO / 2);
-                var startSel = Math.max(0, targetSample - half);
-                if (startSel + minSamplesO > accumulatedWaveform.sampleCount) {
-                    startSel = Math.max(0, accumulatedWaveform.sampleCount - minSamplesO);
-                }
-                var endSel = Math.min(accumulatedWaveform.sampleCount - 1, startSel + minSamplesO);
-                selectionStart = startSel;
-                selectionEnd = endSel;
-                accumulatedWaveform.viewStart = Math.floor(targetSample - visibleSamples / 2);
+                var desiredWindowSamples = Math.max(1, Math.ceil(defaultWindowSeconds * effRateO));
+                if (desiredWindowSamples > accumulatedWaveform.sampleCount) desiredWindowSamples = accumulatedWaveform.sampleCount;
+                var halfWin = Math.floor(desiredWindowSamples / 2);
+
+                // 若在視窗內點擊，且未拖曳（之後 pointerup 判斷），我們改成重新聚焦該點為中心的預設視窗；若在視窗外則跳轉聚焦。
+                if (!isInViewWindow) {
+                var clickRatio = isVertical ? (clickY / rect.height) : (clickX / rect.width);
+                var targetSample = Math.floor(clickRatio * accumulatedWaveform.sampleCount);
+                    var startSel = Math.max(0, targetSample - halfWin);
+                    if (startSel + desiredWindowSamples > accumulatedWaveform.sampleCount) {
+                        startSel = Math.max(0, accumulatedWaveform.sampleCount - desiredWindowSamples);
+                    }
+                    var endSel = Math.min(accumulatedWaveform.sampleCount - 1, startSel + desiredWindowSamples);
+                    selectionStart = startSel;
+                    selectionEnd = endSel;
+                    var targetZoom = accumulatedWaveform.sampleCount / desiredWindowSamples;
+                    if (!isFinite(targetZoom) || targetZoom < 1) targetZoom = 1;
+                    accumulatedWaveform.zoomFactor = targetZoom;
+                    accumulatedWaveform.viewStart = startSel;
                 accumulatedWaveform.isAutoScroll = false;
                 accumulatedWaveform._enforceViewBounds();
                 accumulatedWaveform.draw();
@@ -2779,6 +2981,13 @@ function bindOverviewWaveformInteractions(canvas) {
                 dragStartY = clickY;
                 dragStartViewStart = accumulatedWaveform.viewStart;
                 isInViewWindow = true;
+                } else {
+                    // 先記錄點擊，用於 pointerup 判斷是否為點擊而非拖曳
+                    dragStartX = clickX;
+                    dragStartY = clickY;
+                    dragStartViewStart = accumulatedWaveform.viewStart;
+                    // 標記將在 pointerup 進行聚焦判斷
+                    isInViewWindow = true;
             }
         }
         
@@ -2898,6 +3107,38 @@ function bindOverviewWaveformInteractions(canvas) {
         } else {
             canvas.style.cursor = 'default';
         }
+
+        // 若原本在視窗內點擊且幾乎沒拖曳，則聚焦 defaultWindowSeconds 視窗置中於點擊位置
+        if (event && isInViewWindow && accumulatedWaveform && accumulatedWaveform.sampleCount) {
+            var rect = canvas.getBoundingClientRect();
+            var releaseX = event.clientX - rect.left;
+            var releaseY = event.clientY - rect.top;
+            var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
+            var moveDist = Math.sqrt(Math.pow(releaseX - dragStartX,2) + Math.pow(releaseY - dragStartY,2));
+            if (moveDist < 5) { // 視為點擊
+                var clickRatio = isVertical ? (releaseY / rect.height) : (releaseX / rect.width);
+                var targetSample = Math.floor(clickRatio * accumulatedWaveform.sampleCount);
+                var effRateO = (accumulatedWaveform.sourceSampleRate || 48000) / Math.max(1, accumulatedWaveform.decimationFactor || 1);
+                var desiredWindowSamples = Math.max(1, Math.ceil(defaultWindowSeconds * effRateO));
+                if (desiredWindowSamples > accumulatedWaveform.sampleCount) desiredWindowSamples = accumulatedWaveform.sampleCount;
+                var halfWin = Math.floor(desiredWindowSamples / 2);
+                var startSel = Math.max(0, targetSample - halfWin);
+                if (startSel + desiredWindowSamples > accumulatedWaveform.sampleCount) {
+                    startSel = Math.max(0, accumulatedWaveform.sampleCount - desiredWindowSamples);
+                }
+                var endSel = Math.min(accumulatedWaveform.sampleCount - 1, startSel + desiredWindowSamples);
+                selectionStart = startSel;
+                selectionEnd = endSel;
+                var targetZoom = accumulatedWaveform.sampleCount / desiredWindowSamples;
+                if (!isFinite(targetZoom) || targetZoom < 1) targetZoom = 1;
+                accumulatedWaveform.zoomFactor = targetZoom;
+                accumulatedWaveform.viewStart = startSel;
+                accumulatedWaveform.isAutoScroll = false;
+                accumulatedWaveform._enforceViewBounds();
+                accumulatedWaveform.draw();
+                updatePlaybackButtonsState();
+            }
+        }
     }
     
     canvas.addEventListener('pointerup', endDrag);
@@ -2972,6 +3213,26 @@ function stopRecordingCallback() {
         // 將音頻載入到主播放器
         audio.srcObject = null;
         audio.src = latestRecordingUrl;
+
+    // 錄音完成後預設顯示 defaultWindowSeconds 秒視窗（若總長度 >= 該秒數），並建立選取區
+        try {
+            if (accumulatedWaveform && accumulatedWaveform.sampleCount > 0 && audioContext) {
+                var effRate = (accumulatedWaveform.sourceSampleRate || audioContext.sampleRate || 48000) / Math.max(1, accumulatedWaveform.decimationFactor || 1);
+                var samples1s = Math.max(1, Math.ceil(defaultWindowSeconds * effRate));
+                var totalSamples = accumulatedWaveform.sampleCount;
+                var windowSamples = Math.min(samples1s, totalSamples);
+                // 對齊視窗到最開頭
+                accumulatedWaveform.zoomFactor = totalSamples / windowSamples;
+                accumulatedWaveform.viewStart = 0;
+                accumulatedWaveform.isAutoScroll = false;
+                // 設定選取區（若總長度不足 1 秒則選取整段）
+                selectionStart = 0;
+                selectionEnd = Math.min(totalSamples - 1, windowSamples);
+                accumulatedWaveform._enforceViewBounds();
+                accumulatedWaveform.draw();
+                updatePlaybackButtonsState();
+            }
+    } catch(e) { console.warn('設定預設視窗失敗', e); }
         
         /*-----------------------------------------------------------
          * 清理即時波形顯示
