@@ -223,7 +223,7 @@ var analyser = null;     // 音頻分析器（延遲初始化）
 var analyserSilencer = null; // 用於避免回授的靜音輸出節點
 var preGainNode = null;      // 前級增益節點（AGC 關閉時可放大）
 var mediaDest = null;        // MediaStreamDestination（供 RecordRTC 使用的處理後串流）
-var micGainUserFactor = 2.5; // 使用者設定的前級增益倍率（預設 2.5x）
+var micGainUserFactor = 1.0; // 使用者設定的前級增益倍率（預設 1.5x）
 var defaultWindowSeconds = parseFloat(localStorage.getItem('defaultWindowSeconds') || '1.0'); // 使用者設定的預設視窗秒數
 
 // 即時/累積波形顯示變數
@@ -425,6 +425,18 @@ function gatherAndRenderSpecs() {
         specs.decimation = '尚未建立累積波形';
     }
 
+    // Clipping 規格
+    try {
+        var cs = window.__lastClipStats;
+        if (cs && cs.maxAbs) {
+            var pct = cs.totalSamples ? ((cs.clippedSamples/ cs.totalSamples)*100).toFixed(3) : '0';
+            var maxDb = 20*Math.log10(cs.maxAbs);
+            specs.clipping = 'maxAbs=' + cs.maxAbs.toFixed(4) + ' (' + (maxDb>-90?maxDb.toFixed(1):'-∞') + ' dBFS), clipped=' + cs.clippedSamples + (cs.clippedSamples?(' ('+pct+'%)'):'');
+        } else {
+            specs.clipping = '(未偵測)';
+        }
+    } catch(e){ specs.clipping='(錯誤)'; }
+
     function updateEl(el,key){
         if (!el) return;
         var val = specs[key];
@@ -454,7 +466,7 @@ document.addEventListener('DOMContentLoaded', function(){
     if (gainSlider && gainValue) {
         var renderGain = function(){
             var v = parseFloat(gainSlider.value);
-            if (!isFinite(v)) v = 2.5;
+            if (!isFinite(v)) v = 1.0;
             micGainUserFactor = Math.min(6, Math.max(1, v));
             gainValue.textContent = micGainUserFactor.toFixed(1) + 'x';
         };
@@ -514,6 +526,32 @@ document.addEventListener('DOMContentLoaded', function(){
             applyTheme();
         });
     }
+
+    // 建立自動降增益監視器（僅在錄音期間運行）
+    (function initAutoGainProtection(){
+        var lastToastClip = 0;
+        function loop(){
+            try {
+                if (isCurrentlyRecording && vuMeter && typeof vuMeter.peakDb === 'number' && preGainNode) {
+                    // 峰值距 0dBFS 小於 1dB 且增益高於 1.2 時嘗試降增益
+                    if (vuMeter.peakDb > -1 && preGainNode.gain.value > 1.2) {
+                        preGainNode.gain.value = Math.max(1.0, preGainNode.gain.value - 0.1);
+                        showToast('自動降增益為 ' + preGainNode.gain.value.toFixed(2));
+                    }
+                    // 若最近 2 秒內偵測到 clip，提示使用者手動再降
+                    var now = performance.now ? performance.now() : Date.now();
+                    if (vuMeter.lastClipTime && (now - vuMeter.lastClipTime) < 2000) {
+                        if (now - lastToastClip > 2500) {
+                            showToast('偵測到削波，請考慮再降低 Mic Gain');
+                            lastToastClip = now;
+                        }
+                    }
+                }
+            } catch(e){}
+            setTimeout(loop, 300);
+        }
+        loop();
+    })();
 });
 
 // 更新「可視範圍秒數」指示
@@ -842,6 +880,8 @@ function VUMeter(canvas, analyserNode) {
     this.minDb = -90;         // dBFS 最低顯示範圍
     this.maxDb = 0;
     this.animationId = null;
+    this.lastClipTime = 0;     // 最近一次偵測到 clip 的時間
+    this.clipHoldMillis = 2000;// CLIP 指示保留時間
 }
 
 VUMeter.prototype._computeLevels = function() {
@@ -856,12 +896,14 @@ VUMeter.prototype._computeLevels = function() {
     this.analyser.getFloatTimeDomainData(this.timeData);
     var sumSquares = 0;
     var peak = 0;
+    var clipped = false;
     for (var i = 0; i < this.bufferLength; i++) {
         var v = this.timeData[i];
         if (v > 1) v = 1; else if (v < -1) v = -1; // 夾限避免異常
         sumSquares += v * v;
         var absV = Math.abs(v);
         if (absV > peak) peak = absV;
+        if (absV >= 0.995) clipped = true;
     }
     var rms = Math.sqrt(sumSquares / this.bufferLength);
     // 轉 dB：20 * log10(rms)，避免 log(0)
@@ -871,6 +913,7 @@ VUMeter.prototype._computeLevels = function() {
     if (rmsDb > this.maxDb) rmsDb = this.maxDb;
     if (peakDb < this.minDb) peakDb = this.minDb;
     if (peakDb > this.maxDb) peakDb = this.maxDb;
+    if (clipped) { this.lastClipTime = performance.now ? performance.now() : Date.now(); }
     return { rmsDb: rmsDb, peakDb: peakDb };
 };
 
@@ -969,6 +1012,23 @@ VUMeter.prototype.draw = function(currentDb) {
     var displayPeak = this.peakDb <= this.minDb ? '-∞' : this.peakDb.toFixed(1);
     var txt = 'RMS ' + displayRms + ' dBFS   Peak ' + displayPeak + ' dBFS';
     ctx.fillText(txt, 8, h/2);
+
+    // CLIP 指示：最近 clip 於 2 秒內
+    try {
+        var now = performance.now ? performance.now() : Date.now();
+        if (this.lastClipTime && (now - this.lastClipTime) < this.clipHoldMillis) {
+            ctx.save();
+            ctx.fillStyle = '#B00020';
+            var badgeW = 42, badgeH = 18;
+            ctx.fillRect(w - badgeW - 8, 4, badgeW, badgeH);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px -apple-system,Segoe UI,sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('CLIP', w - badgeW/2 - 8, 4 + badgeH/2 + 0.5);
+            ctx.restore();
+        }
+    } catch(e){}
 };
 
 VUMeter.prototype.update = function() {
@@ -2159,11 +2219,11 @@ function captureMicrophone(callback) {
     var agcToggle = document.getElementById('agc-toggle');
     var agcEnabled = agcToggle ? agcToggle.checked : false;
 
-    // iOS 上若 AGC 關閉常見錄音音量偏低；若使用者尚未自訂增益 (保持預設 2.5x) 則自動提升到 3.5x
+    // iOS 上若 AGC 關閉常見錄音音量偏低；若使用者尚未自訂增益 (保持預設 1.5x) 則自動提升到 3.5x
     try {
         var ua = navigator.userAgent || '';
         var isIOS = /iphone|ipad|ipod/i.test(ua);
-        if (isIOS && !agcEnabled && micGainUserFactor && Math.abs(micGainUserFactor - 2.5) < 0.0001) {
+        if (isIOS && !agcEnabled && micGainUserFactor && Math.abs(micGainUserFactor - 1.5) < 0.0001) {
             micGainUserFactor = 3.5;
             var gainSlider = document.getElementById('mic-gain');
             var gainValue = document.getElementById('mic-gain-value');
@@ -4020,14 +4080,26 @@ function mergeLeftRightBuffers(config, callback) {
         // data chunk length 
         view.setUint32(40, interleavedLength * 2, true);
 
-        // write the PCM samples
+        // write the PCM samples (with clamp, soft-clip stats)
         var lng = interleavedLength;
         var index = 44;
         var volume = 1;
+        var clippedSamples = 0;
+        var maxAbsSample = 0;
         for (var i = 0; i < lng; i++) {
-            view.setInt16(index, interleaved[i] * (0x7FFF * volume), true);
+            var s = interleaved[i];
+            if (s > 1) s = 1; else if (s < -1) s = -1;
+            if (s > 0.90) { // 軟削波區（只處理正峰；負峰用對稱）
+                var sign = s < 0 ? -1 : 1;
+                s = sign * Math.tanh(Math.abs(s) * 2);
+            }
+            var absS = Math.abs(s);
+            if (absS > maxAbsSample) maxAbsSample = absS;
+            if (absS >= 0.995) clippedSamples++;
+            view.setInt16(index, s * (0x7FFF * volume), true);
             index += 2;
         }
+        try { window.__lastClipStats = { fromEncoder:true, clippedSamples:clippedSamples, maxAbs:maxAbsSample, totalSamples:lng, ts:Date.now() }; } catch(e){}
 
         if (cb) {
             return cb({
