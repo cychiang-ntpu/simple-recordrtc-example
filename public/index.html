@@ -23,19 +23,9 @@
 
 <!-- （已移除：AGC、Mic Gain、預設視窗秒數於核心區域顯示，僅保留在進階設定） -->
 
-<!-- 錄音與顯示模式控制按鈕區域（核心操作） -->
-<div class="button-container">
-    <button id="btn-toggle-recording" class="recording-toggle">● 開始錄音</button>
-    <button id="btn-play" class="play-button" disabled>▶ 播放</button>
-    <button id="btn-pause" disabled>⏸ 暫停</button>
-    <button id="btn-stop-playback" disabled>⏹ 停止</button>
-    <button id="btn-jump-start" disabled>⏮ 回到開始</button>
-    <button id="btn-clear-selection" disabled>✕ 取消選取區間</button>
-    <button id="btn-download-recording" disabled>下載錄音</button>
-    <!-- 迷你音量條（核心區） -->
-    <div class="mini-level" aria-label="Level">
-        <div id="mini-level-bar"></div>
-    </div>
+<!-- 迷你音量條（保留於標題下方） -->
+<div class="mini-level" aria-label="Level" style="max-width:750px;margin:6px 0;">
+    <div id="mini-level-bar"></div>
 </div>
 
 <!-- 波形容器：支援水平與垂直模式 -->
@@ -50,6 +40,18 @@
     <div class="waveform-col live-col">
         <canvas class="wave-canvas" id="waveform" width="750" height="200"></canvas>
     </div>
+</div>
+
+<!-- 波形下方操作列：錄音/播放/控制按鈕 -->
+<div id="waveform-action-bar" class="waveform-action-bar" style="max-width:750px;margin:12px auto 8px;display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;align-items:center;">
+    <button id="btn-toggle-recording" class="recording-toggle">● 開始錄音</button>
+    <button id="btn-play" class="play-button" disabled>▶ 播放</button>
+    <button id="btn-pause" disabled>⏸ 暫停</button>
+    <button id="btn-stop-playback" disabled>⏹ 停止</button>
+    <button id="btn-jump-start" disabled>⏮ 回到開始</button>
+    <button id="btn-clear-selection" disabled>✕ 取消選取區間</button>
+    <button id="btn-download-recording" disabled>下載錄音</button>
+    <span class="action-hint" style="font-size:12px;color:#555;flex-basis:100%;">提示：錄音時僅顯示「停止錄音」，播放期間可使用暫停/停止與選取操作。</span>
 </div>
 
 <!-- 進階設定（預設收合） -->
