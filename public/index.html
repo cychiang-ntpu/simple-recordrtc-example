@@ -57,7 +57,7 @@
     <summary>進階設定 Advanced</summary>
     <div class="advanced-content">
         <details class="adv-section" id="adv-device" open>
-            <summary>裝置與輸入</summary>
+            <summary>裝置</summary>
             <div class="mic-select-container" id="mic-select-container">
                 <label for="mic-select" class="mic-label">輸入裝置 Microphone</label>
                 <select id="mic-select" class="mic-select" aria-label="Select Microphone" disabled>
@@ -65,6 +65,14 @@
                 </select>
                 <button type="button" id="btn-refresh-mics" class="mic-refresh" title="重新整理裝置清單">重新整理</button>
                 <small class="mic-hint" id="mic-hint">如顯示未授權，請先允許麥克風存取再按重新整理。</small>
+            </div>
+            <div class="spk-select-container" id="spk-select-container">
+                <label for="spk-select" class="mic-label">輸出裝置 Output</label>
+                <select id="spk-select" class="mic-select" aria-label="Select Output Device" disabled>
+                    <option>讀取裝置中…</option>
+                </select>
+                <button type="button" id="btn-refresh-outputs" class="mic-refresh" title="重新整理輸出裝置清單">重新整理</button>
+                <small class="mic-hint" id="spk-hint">部分瀏覽器需 HTTPS 與授權後才可指定輸出裝置。</small>
             </div>
             <div class="agc-container">
                 <label class="agc-label">
@@ -142,10 +150,7 @@
 
 <br>
 
-<!-- HTML5 音頻播放控制器：改為預設 muted、無 controls，避免 iOS 將情境歸類為「同時播放」導致輸入衰減。
-    - 稍後在載入錄音 Blob 後再解除 muted 並加上 controls。
-    - playsinline: 在移動設備上內聯播放 -->
-<audio id="playback-audio" muted playsinline preload="none"></audio>
+
 
 
 <!-- 引入 RecordRTC 錄音庫 -->

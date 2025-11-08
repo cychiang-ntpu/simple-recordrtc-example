@@ -4,7 +4,14 @@
  *================================================================*/
 
 // DOM 元素引用
-var audio = document.getElementById('playback-audio') || document.querySelector('audio');                    // 主要音頻播放元素
+var audio = document.getElementById('playback-audio') || document.querySelector('audio'); // 主播放元素（若頁面無則於首次需求時動態建立）
+if (!audio) {
+    audio = document.createElement('audio');
+    audio.setAttribute('preload','none');
+    audio.setAttribute('playsinline','');
+    audio.style.display = 'none'; // 不干擾版面
+    document.body.appendChild(audio);
+}
 var downloadButton = document.getElementById('btn-download-recording');     // 下載按鈕
 var btnPlay = document.getElementById('btn-play');             // 播放
 var btnPause = document.getElementById('btn-pause');           // 暫停
@@ -14,6 +21,8 @@ var btnJumpStart = document.getElementById('btn-jump-start'); // 回到開始
 var displayModeRadios = document.querySelectorAll('input[name="display-mode"]'); // 顯示模式切換
 var micSelect = document.getElementById('mic-select'); // 麥克風選擇器
 var btnRefreshMics = document.getElementById('btn-refresh-mics'); // 重新整理裝置
+var spkSelect = document.getElementById('spk-select'); // 輸出裝置選擇器
+var btnRefreshSpks = document.getElementById('btn-refresh-outputs'); // 重新整理輸出裝置
 
 // 簡單方向管理器（先掛鉤 UI，之後再逐步導入渲染）
 var orientationManager = {
@@ -243,6 +252,8 @@ var showClipMarks = (localStorage.getItem('showClipMarks') !== 'false'); // 顯�
 var lastSpecs = {}; // 保存最近一次顯示的規格
 var preferredMicKey = 'preferredMicDeviceId';
 var selectedMicDeviceId = localStorage.getItem(preferredMicKey) || '';
+var preferredOutKey = 'preferredOutputDeviceId';
+var selectedOutDeviceId = localStorage.getItem(preferredOutKey) || 'default';
 var lastAudioConstraintsUsed = null; // 供規格面板顯示
 
 // 輕量提示訊息（使用頁腳 #send-message）
@@ -462,6 +473,8 @@ document.addEventListener('DOMContentLoaded', function(){
     applyOverviewVisibility();
     // 嘗試列出麥克風
     populateMicDevices();
+    // 列出輸出裝置
+    populateOutputDevices();
     // 初始化 Mic Gain UI
     var gainSlider = document.getElementById('mic-gain');
     var gainValue = document.getElementById('mic-gain-value');
@@ -504,6 +517,12 @@ document.addEventListener('DOMContentLoaded', function(){
             windowSecReset.addEventListener('click', function(){ applyWindowSeconds(1.0); });
         }
     }
+    // 初次嘗試套用既有輸出裝置偏好
+    setTimeout(function(){
+        try {
+            if (selectedOutDeviceId) applyOutputSink(selectedOutDeviceId);
+        } catch(e){}
+    }, 500);
 });
 
 // 綁定 Overview 與主題切換（第二個 DOMContentLoaded 事件可合併，這裡保持簡潔）
@@ -680,6 +699,82 @@ function populateMicDevices() {
     }
 }
 
+function populateOutputDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+        if (spkSelect) {
+            spkSelect.innerHTML = '<option>此環境不支援輸出裝置列舉</option>';
+            spkSelect.disabled = true;
+        }
+        return;
+    }
+    function enumerate(){
+        navigator.mediaDevices.enumerateDevices().then(function(devices){
+            var outs = devices.filter(function(d){ return d.kind === 'audiooutput'; });
+            if (!spkSelect) return;
+            spkSelect.innerHTML = '';
+            // Default option
+            var optDef = document.createElement('option');
+            optDef.value = 'default';
+            optDef.textContent = '系統預設輸出 (Default)';
+            spkSelect.appendChild(optDef);
+            if (!outs.length) {
+                var opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = '未偵測到輸出裝置';
+                spkSelect.appendChild(opt);
+                spkSelect.disabled = true;
+                var hint = document.getElementById('spk-hint');
+                if (hint) hint.textContent = '可能需要授權或此瀏覽器不支援設定輸出裝置。';
+                return;
+            }
+            spkSelect.disabled = false;
+            outs.forEach(function(d, idx){
+                var opt = document.createElement('option');
+                opt.value = d.deviceId || '';
+                var label = d.label || ('Speaker ' + (idx+1));
+                opt.textContent = label;
+                spkSelect.appendChild(opt);
+            });
+            // restore selection
+            try {
+                if (selectedOutDeviceId) spkSelect.value = selectedOutDeviceId;
+            } catch(e){}
+        }).catch(function(err){
+            console.warn('enumerateDevices for outputs failed:', err);
+            if (spkSelect) {
+                spkSelect.innerHTML = '<option>需授權或瀏覽器不支援</option>';
+                spkSelect.disabled = true;
+            }
+        });
+    }
+    // 若從未授權，labels 可能為空 — 共用 mic 權限流程以取得 labels
+    if (!populateOutputDevices._hasEnumeratedOnce) {
+        populateOutputDevices._hasEnumeratedOnce = true;
+        requestMicAccessForListing().finally(enumerate);
+    } else {
+        enumerate();
+    }
+}
+
+function applyOutputSink(deviceId) {
+    var audioEl = audio || document.querySelector('audio');
+    if (!audioEl) return;
+    if (typeof audioEl.setSinkId !== 'function') {
+        var hint = document.getElementById('spk-hint');
+        if (hint) hint.textContent = '此瀏覽器不支援切換輸出裝置';
+        return;
+    }
+    if (!deviceId) deviceId = 'default';
+    audioEl.setSinkId(deviceId).then(function(){
+        var hint = document.getElementById('spk-hint');
+        if (hint) hint.textContent = '已套用輸出裝置: ' + (deviceId==='default'?'系統預設':deviceId);
+    }).catch(function(err){
+        console.warn('setSinkId 失敗', err);
+        var hint = document.getElementById('spk-hint');
+        if (hint) hint.textContent = '套用輸出裝置失敗: ' + (err && err.message ? err.message : err);
+    });
+}
+
 if (micSelect) {
     micSelect.addEventListener('change', function(){
         var newId = micSelect.value || '';
@@ -696,15 +791,38 @@ if (micSelect) {
     });
 }
 
+if (spkSelect) {
+    spkSelect.addEventListener('change', function(){
+        var newOut = spkSelect.value || 'default';
+        selectedOutDeviceId = newOut;
+        localStorage.setItem(preferredOutKey, selectedOutDeviceId);
+        applyOutputSink(selectedOutDeviceId);
+    });
+}
+
 if (btnRefreshMics) {
     btnRefreshMics.addEventListener('click', function(){
         populateMicDevices();
+    });
+}
+if (btnRefreshSpks) {
+    btnRefreshSpks.addEventListener('click', function(){
+        populateOutputDevices();
+        // 重新整理後嘗試套用現有偏好
+        setTimeout(function(){
+            try { if (selectedOutDeviceId) applyOutputSink(selectedOutDeviceId); } catch(e){}
+        }, 300);
     });
 }
 
 if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
     navigator.mediaDevices.addEventListener('devicechange', function(){
         populateMicDevices();
+        populateOutputDevices();
+        // 裝置變動時若偏好仍存在嘗試重套用
+        setTimeout(function(){
+            try { if (selectedOutDeviceId) applyOutputSink(selectedOutDeviceId); } catch(e){}
+        }, 400);
     });
 }
 
