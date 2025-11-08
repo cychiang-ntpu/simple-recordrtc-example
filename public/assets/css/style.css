@@ -207,7 +207,8 @@ html {
     flex-direction: column;
     align-items: stretch;
     justify-content: stretch;
-    height: 80vh; /* 關鍵：垂直模式高度 ~80% 視窗高 */
+    height: 55vh; /* 調整為 55vh,確保進階設定收合後整頁可見 */
+    max-height: 500px; /* 限制最大高度避免過高 */
     background: linear-gradient(135deg, #ffffff 0%, #f7fafc 100%);
     border-radius: 12px;
     box-shadow: 0 6px 12px rgba(0,0,0,0.08);
