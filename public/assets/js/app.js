@@ -88,6 +88,9 @@ function applyDisplayMode(){
         // 任何模式均不重繪（水平模式新需求亦隱藏 live）
     }
 
+    // 套用 Overview 顯示偏好（可能在模式切換後需重新調整佈局）
+    applyOverviewVisibility();
+
     // 調整 VU Meter 畫布像素尺寸以符合當前 CSS 尺寸與 DPR
     if (vuCanvas) {
         var dprVU = window.devicePixelRatio || 1;
@@ -231,6 +234,8 @@ var latestRecordingBlob = null;   // 最近一次錄音的 Blob
 var latestRecordingUrl = null;    // 最近一次錄音的 Object URL
 var accumulatedControlsBound = false; // 是否已綁定累積波形互動
 var vuMeter = null;               // VU Meter 實例
+var showOverview = (localStorage.getItem('showOverview') !== 'false'); // Overview 顯示偏好（預設 true）
+var themePref = localStorage.getItem('theme') || 'light'; // 主題偏好
 // 測試音功能已移除
 // 規格面板更新相關
 var lastSpecs = {}; // 保存最近一次顯示的規格
@@ -262,6 +267,21 @@ function showToast(message, opts){
     container.appendChild(item);
     setTimeout(function(){ item.classList.add('out'); }, ttl - 400);
     setTimeout(function(){ try { container.removeChild(item); } catch(e){} }, ttl);
+}
+
+// 主題套用
+function applyTheme(){
+    try {
+        var root = document.documentElement;
+        if (themePref === 'dark') root.setAttribute('data-theme','dark'); else root.removeAttribute('data-theme');
+    } catch(e){}
+}
+
+// Overview 顯示/隱藏
+function applyOverviewVisibility(){
+    var wrapper = document.getElementById('waveform-wrapper');
+    if(!wrapper) return;
+    if(showOverview) wrapper.classList.remove('no-overview'); else wrapper.classList.add('no-overview');
 }
 
 // 迷你音量條更新（RMS/Peak 來源）
@@ -424,6 +444,8 @@ function gatherAndRenderSpecs() {
 // 啟動時先渲染一次基本資訊
 document.addEventListener('DOMContentLoaded', function(){
     gatherAndRenderSpecs();
+    applyTheme();
+    applyOverviewVisibility();
     // 嘗試列出麥克風
     populateMicDevices();
     // 初始化 Mic Gain UI
@@ -467,6 +489,30 @@ document.addEventListener('DOMContentLoaded', function(){
         if (windowSecReset) {
             windowSecReset.addEventListener('click', function(){ applyWindowSeconds(1.0); });
         }
+    }
+});
+
+// 綁定 Overview 與主題切換（第二個 DOMContentLoaded 事件可合併，這裡保持簡潔）
+document.addEventListener('DOMContentLoaded', function(){
+    var overviewToggle = document.getElementById('toggle-overview');
+    if (overviewToggle) {
+        try { overviewToggle.checked = !!showOverview; } catch(e){}
+        overviewToggle.addEventListener('change', function(){
+            showOverview = !!overviewToggle.checked;
+            localStorage.setItem('showOverview', String(showOverview));
+            applyOverviewVisibility();
+            if (accumulatedWaveform) { try { accumulatedWaveform.draw(); } catch(e){} }
+            if (overviewWaveform) { try { overviewWaveform.draw(); } catch(e){} }
+        });
+    }
+    var darkToggle = document.getElementById('toggle-dark-mode');
+    if (darkToggle) {
+        try { darkToggle.checked = (themePref === 'dark'); } catch(e){}
+        darkToggle.addEventListener('change', function(){
+            themePref = darkToggle.checked ? 'dark' : 'light';
+            localStorage.setItem('theme', themePref);
+            applyTheme();
+        });
     }
 });
 

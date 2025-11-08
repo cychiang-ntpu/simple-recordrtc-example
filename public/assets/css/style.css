@@ -65,6 +65,9 @@ html, body {
 #waveform-wrapper.mode-horizontal .accumulated-col { order: 1; }
 #waveform-wrapper.mode-horizontal .overview-col { order: 2; }
 #waveform-wrapper.mode-horizontal .live-col { display: none; }
+/* 隱藏 Overview 時的佈局調整 */
+#waveform-wrapper.no-overview .overview-col { display:none; }
+#waveform-wrapper.no-overview.mode-vertical { grid-template-columns: 1fr; }
 
 /* 進階設定折疊面板 */
 details.advanced-panel {
@@ -87,6 +90,13 @@ details.advanced-panel > summary {
 details.advanced-panel > summary::-webkit-details-marker { display:none; }
 details.advanced-panel[open] > summary { border-bottom: 1px solid var(--color-border); }
 details.advanced-panel .advanced-content { padding: 12px 14px 18px; display: flex; flex-direction: column; gap: 16px; }
+/* 區段式折疊 (Accordion) */
+details.adv-section { border: 1px solid var(--color-border); border-radius: var(--radius-sm); overflow: hidden; background: var(--color-bg); }
+details.adv-section + details.adv-section { margin-top: 10px; }
+details.adv-section > summary { padding: 10px 12px; font-weight:600; background: var(--color-bg-soft); cursor: pointer; list-style: none; }
+details.adv-section > summary::-webkit-details-marker { display:none; }
+details.adv-section[open] > summary { border-bottom: 1px solid var(--color-border); }
+.display-extras { display:flex; gap:16px; align-items:center; padding: 8px 4px; color: var(--color-text); flex-wrap: wrap; }
 
 /* 迷你音量條（核心區簡化版 VU） */
 .mini-level { position: relative; width: 160px; height: 10px; background: #e2e8f0; border-radius: 6px; overflow:hidden; box-shadow: inset 0 0 2px rgba(0,0,0,0.15); }
@@ -97,6 +107,26 @@ details.advanced-panel .advanced-content { padding: 12px 14px 18px; display: fle
 @media (max-width: 600px) {
     .mini-level { width: 120px; }
 }
+
+/* 深色主題（以 data-theme="dark" 切換） */
+[data-theme="dark"] {
+    --color-bg: #0f172a;
+    --color-bg-alt: #111827;
+    --color-bg-soft: #0b1220;
+    --color-border: #263042;
+    --color-border-strong: #344056;
+    --color-text: #e5e7eb;
+    --color-text-muted: #9ca3af;
+    --color-accent: #60a5fa;
+    --color-accent-alt: #34d399;
+    --color-success: #10b981;
+    --color-danger: #ef4444;
+}
+[data-theme="dark"] body::before { background: rgba(17,24,39,0.92); }
+[data-theme="dark"] .specs-panel { background:#0f172a; border-color:#263042; }
+[data-theme="dark"] .specs-panel > summary { background:#111827; border-bottom-color:#263042; color:#e5e7eb; }
+[data-theme="dark"] #vu-meter { border-color:#263042; }
+[data-theme="dark"] .waveform-toolbar { background: linear-gradient(135deg,#0f172a 0%, #111827 100%); }
 
 /* 預設視窗秒數設定區塊 */
 .default-window-container {
