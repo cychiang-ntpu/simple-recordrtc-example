@@ -94,6 +94,26 @@ html {
     box-shadow: inset 0 0 4px rgba(0,0,0,0.4);
 }
 
+/* 麥克風選擇器 */
+.mic-select-container {
+    max-width: 1400px;
+    margin: 8px auto 0;
+    padding: 8px 12px;
+    display: grid;
+    grid-template-columns: 160px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+}
+.mic-label { color:#2d3748; font-weight:600; }
+.mic-select { width: 100%; padding: 8px 10px; border:1px solid #cbd5e0; border-radius:8px; background:#f8fafc; }
+.mic-refresh { padding: 9px 12px; border: none; border-radius: 8px; background: linear-gradient(135deg,#4facfe 0%,#00f2fe 100%); color:#fff; font-weight:600; cursor:pointer; }
+.mic-refresh:disabled { opacity:.5; cursor:not-allowed; }
+.mic-hint { grid-column: 1 / -1; color:#718096; font-size:12px; }
+
 /* 錄音規格面板 */
 .specs-panel {
     margin: 8px 0 0;
@@ -440,6 +460,8 @@ html {
     }
     /* 手機 VU Meter 調整高度以利觀察 */
     #vu-meter { height: 34px; margin: 4px auto 6px; }
+    .mic-select-container { grid-template-columns: 1fr; padding: 8px; margin: 6px auto 0; }
+    .mic-label { margin-bottom: 4px; }
     .specs-panel { margin: 6px 0 0; }
     
     /* 全局波形標籤容器 */
@@ -926,6 +948,7 @@ html {
     }
     /* 平板 VU Meter 尺寸 */
     #vu-meter { height: 30px; margin-bottom: 4px; }
+    .mic-select-container { max-width: 700px; }
     .specs-panel { max-width: 700px; margin: 6px auto 0; }
     
     /* 全局波形標籤容器 */
@@ -1408,6 +1431,7 @@ html {
     }
     /* 桌機 VU Meter 尺寸 */
     #vu-meter { height: 32px; margin: 6px auto 8px; }
+    .mic-select-container { max-width: 950px; }
     .specs-panel { max-width: 950px; margin: 8px auto 0; }
     
     /* 全局波形標籤容器 */

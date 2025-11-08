@@ -12,6 +12,8 @@ var btnStopPlayback = document.getElementById('btn-stop-playback'); // 停止播
 var btnClearSelection = document.getElementById('btn-clear-selection'); // 取消選取
 var btnJumpStart = document.getElementById('btn-jump-start'); // 回到開始
 var displayModeRadios = document.querySelectorAll('input[name="display-mode"]'); // 顯示模式切換
+var micSelect = document.getElementById('mic-select'); // 麥克風選擇器
+var btnRefreshMics = document.getElementById('btn-refresh-mics'); // 重新整理裝置
 
 // 簡單方向管理器（先掛鉤 UI，之後再逐步導入渲染）
 var orientationManager = {
@@ -157,6 +159,8 @@ var vuMeter = null;               // VU Meter 實例
 // 測試音功能已移除
 // 規格面板更新相關
 var lastSpecs = {}; // 保存最近一次顯示的規格
+var preferredMicKey = 'preferredMicDeviceId';
+var selectedMicDeviceId = localStorage.getItem(preferredMicKey) || '';
 
 function detectEnvironment() {
     var ua = navigator.userAgent || '';
@@ -207,7 +211,9 @@ function gatherAndRenderSpecs() {
         var tracks = recorder.microphone.getAudioTracks ? recorder.microphone.getAudioTracks() : [];
         if (tracks && tracks.length) {
             var settings = tracks[0].getSettings ? tracks[0].getSettings() : {};
+            var label = tracks[0].label || '';
             var parts = [];
+            if (label) parts.push('device=' + label);
             if (settings.sampleRate) parts.push('sampleRate=' + settings.sampleRate);
             if (settings.channelCount) parts.push('channelCount=' + settings.channelCount);
             if (settings.sampleSize) parts.push('sampleSize=' + settings.sampleSize + 'bit');
@@ -285,7 +291,105 @@ function gatherAndRenderSpecs() {
 // 啟動時先渲染一次基本資訊
 document.addEventListener('DOMContentLoaded', function(){
     gatherAndRenderSpecs();
+    // 嘗試列出麥克風
+    populateMicDevices();
 });
+
+/*=================================================================
+ * 麥克風裝置列舉與切換
+ *================================================================*/
+
+function requestMicAccessForListing() {
+    // 先短暫要求音訊存取以取得裝置標籤（某些瀏覽器未授權時 labels 為空）
+    return navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        .then(function(stream){
+            // 立即停止 tracks
+            stream.getTracks().forEach(function(t){ try { t.stop(); } catch(e){} });
+        }).catch(function(err){
+            // 無法取得授權，交由 UI 顯示提示
+            console.warn('Mic access for listing failed:', err);
+        });
+}
+
+function populateMicDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+        // 不支援 enumerateDevices
+        if (micSelect) {
+            micSelect.innerHTML = '<option>此環境不支援裝置列舉</option>';
+            micSelect.disabled = true;
+        }
+        return;
+    }
+
+    // 如果沒有授權，labels 可能為空 — 先嘗試要求一次權限（忽略失敗）
+    var tryAccess = requestMicAccessForListing();
+    Promise.resolve(tryAccess).finally(function(){
+        navigator.mediaDevices.enumerateDevices().then(function(devices){
+            var mics = devices.filter(function(d){ return d.kind === 'audioinput'; });
+            if (!micSelect) return;
+            micSelect.innerHTML = '';
+            if (!mics.length) {
+                micSelect.innerHTML = '<option>未偵測到麥克風</option>';
+                micSelect.disabled = true;
+                var hint = document.getElementById('mic-hint');
+                if (hint) hint.textContent = '請確認裝置連線或授權狀態。';
+                return;
+            }
+            micSelect.disabled = false;
+            var foundPreferred = false;
+            mics.forEach(function(mic, idx){
+                var opt = document.createElement('option');
+                opt.value = mic.deviceId || '';
+                var label = mic.label || ('Microphone ' + (idx+1));
+                opt.textContent = label;
+                micSelect.appendChild(opt);
+                if (selectedMicDeviceId && mic.deviceId === selectedMicDeviceId) {
+                    foundPreferred = true;
+                    micSelect.value = mic.deviceId;
+                }
+            });
+            if (!foundPreferred) {
+                // 若未找到先前偏好，預設第一個
+                selectedMicDeviceId = mics[0].deviceId || '';
+                micSelect.value = selectedMicDeviceId;
+                localStorage.setItem(preferredMicKey, selectedMicDeviceId);
+            }
+        }).catch(function(err){
+            console.warn('enumerateDevices failed:', err);
+            if (micSelect) {
+                micSelect.innerHTML = '<option>需授權才能列出裝置</option>';
+                micSelect.disabled = true;
+            }
+        });
+    });
+}
+
+if (micSelect) {
+    micSelect.addEventListener('change', function(){
+        var newId = micSelect.value || '';
+        if (isCurrentlyRecording) {
+            alert('請先停止錄音後再切換麥克風');
+            // 還原選取
+            micSelect.value = selectedMicDeviceId || '';
+            return;
+        }
+        selectedMicDeviceId = newId;
+        localStorage.setItem(preferredMicKey, selectedMicDeviceId);
+        gatherAndRenderSpecs();
+    });
+}
+
+if (btnRefreshMics) {
+    btnRefreshMics.addEventListener('click', function(){
+        populateMicDevices();
+    });
+}
+
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', function(){
+        populateMicDevices();
+    });
+}
 
 // 區域選取相關變數
 var selectionStart = null;        // 選取起始樣本索引
@@ -1630,14 +1734,20 @@ function captureMicrophone(callback) {
     // 讀取 AGC 設定
     var agcToggle = document.getElementById('agc-toggle');
     var agcEnabled = agcToggle ? agcToggle.checked : false;
-    
+
+    var audioConstraints = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: agcEnabled
+    };
+    // 若使用者選擇了特定麥克風，加入 deviceId 限制
+    if (selectedMicDeviceId) {
+        audioConstraints.deviceId = { exact: selectedMicDeviceId };
+    }
+
     navigator.mediaDevices.getUserMedia({
-        audio: {
-            echoCancellation: false,    // 關閉回音消除
-            noiseSuppression: false,    // 關閉噪音抑制
-            autoGainControl: agcEnabled // 根據使用者設定啟用/停用 AGC
-        },
-        video: false                    // 不需要視頻
+        audio: audioConstraints,
+        video: false
     }).then(function(microphone) {
         callback(microphone);           // 成功時執行回調
     }).catch(function(error) {

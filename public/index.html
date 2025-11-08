@@ -45,6 +45,16 @@
     </div>
 </div>
 
+<!-- 麥克風選擇器 -->
+<div class="mic-select-container" id="mic-select-container">
+    <label for="mic-select" class="mic-label">輸入裝置 Microphone</label>
+    <select id="mic-select" class="mic-select" aria-label="Select Microphone" disabled>
+        <option>讀取裝置中…</option>
+    </select>
+    <button type="button" id="btn-refresh-mics" class="mic-refresh" title="重新整理裝置清單">重新整理</button>
+    <small class="mic-hint" id="mic-hint">如顯示未授權，請先允許麥克風存取再按重新整理。</small>
+    </div>
+
 <!-- 波形容器：支援水平與垂直模式 -->
 <!-- 置頂 VU Meter -->
 <div class="vu-container">
