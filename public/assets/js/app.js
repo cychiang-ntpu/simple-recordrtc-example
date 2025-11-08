@@ -236,6 +236,8 @@ var accumulatedControlsBound = false; // 是否已綁定累積波形互動
 var vuMeter = null;               // VU Meter 實例
 var showOverview = (localStorage.getItem('showOverview') !== 'false'); // Overview 顯示偏好（預設 true）
 var themePref = localStorage.getItem('theme') || 'light'; // 主題偏好
+var autoGainProtect = (localStorage.getItem('autoGainProtect') !== 'false'); // 自動降增益保護（預設開啟）
+var showClipMarks = (localStorage.getItem('showClipMarks') !== 'false'); // 顯示削波標記（預設開啟）
 // 測試音功能已移除
 // 規格面板更新相關
 var lastSpecs = {}; // 保存最近一次顯示的規格
@@ -527,12 +529,32 @@ document.addEventListener('DOMContentLoaded', function(){
         });
     }
 
+    var agProtectToggle = document.getElementById('toggle-auto-gain-protect');
+    if (agProtectToggle) {
+        try { agProtectToggle.checked = !!autoGainProtect; } catch(e){}
+        agProtectToggle.addEventListener('change', function(){
+            autoGainProtect = !!agProtectToggle.checked;
+            localStorage.setItem('autoGainProtect', String(autoGainProtect));
+            showToast('自動降增益保護' + (autoGainProtect ? '已啟用' : '已停用'));
+        });
+    }
+    var clipMarkToggle = document.getElementById('toggle-clip-mark');
+    if (clipMarkToggle) {
+        try { clipMarkToggle.checked = !!showClipMarks; } catch(e){}
+        clipMarkToggle.addEventListener('change', function(){
+            showClipMarks = !!clipMarkToggle.checked;
+            localStorage.setItem('showClipMarks', String(showClipMarks));
+            if (accumulatedWaveform) { try { accumulatedWaveform.draw(); } catch(e){} }
+            if (overviewWaveform) { try { overviewWaveform.draw(); } catch(e){} }
+        });
+    }
+
     // 建立自動降增益監視器（僅在錄音期間運行）
     (function initAutoGainProtection(){
         var lastToastClip = 0;
         function loop(){
             try {
-                if (isCurrentlyRecording && vuMeter && typeof vuMeter.peakDb === 'number' && preGainNode) {
+                if (autoGainProtect && isCurrentlyRecording && vuMeter && typeof vuMeter.peakDb === 'number' && preGainNode) {
                     // 峰值距 0dBFS 小於 1dB 且增益高於 1.2 時嘗試降增益
                     if (vuMeter.peakDb > -1 && preGainNode.gain.value > 1.2) {
                         preGainNode.gain.value = Math.max(1.0, preGainNode.gain.value - 0.1);
@@ -1488,6 +1510,15 @@ AccumulatedWaveform.prototype.draw = function() {
                 var yBottom = centerY - adjustedMin * centerY;
                 ctx.moveTo(drawX + 0.5, yTop);
                 ctx.lineTo(drawX + 0.5, yBottom);
+                // 削波標記（樣本級）
+                if (showClipMarks && (Math.abs(adjustedMax) >= 0.99 || Math.abs(adjustedMin) >= 0.99)) {
+                    ctx.stroke();
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(176,0,32,0.55)';
+                    ctx.fillRect(drawX - 1, 0, 2, height); // 紅色細柱
+                    ctx.restore();
+                    ctx.beginPath();
+                }
             }
         } else {
             for (var x = 0; x < width; x++) {
@@ -1513,6 +1544,14 @@ AccumulatedWaveform.prototype.draw = function() {
                 var yBottom2 = centerY - adjustedMinLarge * centerY;
                 ctx.moveTo(x + 0.5, yTop2);
                 ctx.lineTo(x + 0.5, yBottom2);
+                if (showClipMarks && (Math.abs(adjustedMaxLarge) >= 0.99 || Math.abs(adjustedMinLarge) >= 0.99)) {
+                    ctx.stroke();
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(176,0,32,0.35)';
+                    ctx.fillRect(x, 0, 1, height);
+                    ctx.restore();
+                    ctx.beginPath();
+                }
             }
         }
     } else {
@@ -1535,6 +1574,14 @@ AccumulatedWaveform.prototype.draw = function() {
                 var xRight = centerX + aMax * centerX;
                 ctx.moveTo(xLeft, drawY + 0.5);
                 ctx.lineTo(xRight, drawY + 0.5);
+                if (showClipMarks && (Math.abs(aMax) >= 0.99 || Math.abs(aMin) >= 0.99)) {
+                    ctx.stroke();
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(176,0,32,0.55)';
+                    ctx.fillRect(0, drawY - 1, width, 2);
+                    ctx.restore();
+                    ctx.beginPath();
+                }
             }
         } else {
             for (var y = 0; y < height; y++) {
@@ -1560,6 +1607,14 @@ AccumulatedWaveform.prototype.draw = function() {
                 var xRight2 = centerX + adjMax * centerX;
                 ctx.moveTo(xLeft2, y + 0.5);
                 ctx.lineTo(xRight2, y + 0.5);
+                if (showClipMarks && (Math.abs(adjMax) >= 0.99 || Math.abs(adjMin) >= 0.99)) {
+                    ctx.stroke();
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(176,0,32,0.35)';
+                    ctx.fillRect(0, y, width, 1);
+                    ctx.restore();
+                    ctx.beginPath();
+                }
             }
         }
     }
