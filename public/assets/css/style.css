@@ -75,6 +75,26 @@ html {
     -webkit-user-select: none;
 }
 
+/* VU Meter 基礎樣式（所有裝置共用） */
+#vu-meter {
+    display: block;
+    width: 100%;
+    height: 24px;
+    margin: 6px 0 0;
+    border: 2px solid #e2e8f0;
+    border-radius: 6px;
+    background: linear-gradient(90deg,#1b1f24,#2d3748);
+    box-shadow: inset 0 0 4px rgba(0,0,0,0.4);
+}
+.vu-container { width: 100%; }
+
+/* 垂直模式下 VU Meter 固定高度並與 live waveform 分隔 */
+#waveform-wrapper.mode-vertical .live-col #vu-meter {
+    flex: 0 0 auto;
+    height: 28px;
+    margin-top: 8px;
+}
+
 /* 在垂直模式下，避免外層媒體查詢中的固定高度干擾（提高優先級） */
 @media screen and (max-width: 1024px) {
     #waveform-wrapper.mode-vertical canvas {
@@ -366,6 +386,8 @@ html {
     #accumulated-waveform:active {
         cursor: grabbing;
     }
+    /* 手機 VU Meter 調整為較高以利觸控觀察 */
+    #vu-meter { height: 30px; margin: 8px auto 0; }
     
     /* 全局波形標籤容器 */
     div[style*="text-align: center"] {
@@ -849,6 +871,8 @@ html {
     #accumulated-waveform:active {
         cursor: grabbing;
     }
+    /* 平板 VU Meter 尺寸 */
+    #vu-meter { height: 26px; }
     
     /* 全局波形標籤容器 */
     div[style*="text-align: center"] {
@@ -1328,6 +1352,8 @@ html {
     #accumulated-waveform:active {
         cursor: grabbing;
     }
+    /* 桌機 VU Meter 尺寸 */
+    #vu-meter { height: 26px; max-width: 950px; margin: 10px auto 0; }
     
     /* 全局波形標籤容器 */
     div[style*="text-align: center"] {

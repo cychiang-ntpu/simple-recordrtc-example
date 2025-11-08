@@ -41,6 +41,7 @@ function applyDisplayMode(){
     var overviewCanvas = document.getElementById('overview-waveform');
     var accumCanvas = document.getElementById('accumulated-waveform');
     var liveCanvas = document.getElementById('waveform');
+    var vuCanvas = document.getElementById('vu-meter');
 
     if(orientationManager.isVertical()){
         // 垂直模式：外觀高度使用 CSS 80vh，JS 設定像素尺寸以便繪製清晰度（含 devicePixelRatio）
@@ -91,6 +92,21 @@ function applyDisplayMode(){
         liveWaveform.width = liveCanvas.width;
         liveWaveform.height = liveCanvas.height;
     }
+
+    // 調整 VU Meter 畫布像素尺寸以符合當前 CSS 尺寸與 DPR
+    if (vuCanvas) {
+        var dprVU = window.devicePixelRatio || 1;
+        var cssVW = vuCanvas.clientWidth || 300;
+        var cssVH = vuCanvas.clientHeight || 24;
+        vuCanvas.width = Math.round(cssVW * dprVU);
+        vuCanvas.height = Math.round(cssVH * dprVU);
+        if (vuMeter && typeof vuMeter.resize === 'function') {
+            vuMeter.resize();
+            if (typeof vuMeter.draw === 'function') {
+                vuMeter.draw(vuMeter.levelDb || -60);
+            }
+        }
+    }
 }
 
 if (displayModeRadios && displayModeRadios.length) {
@@ -100,6 +116,16 @@ if (displayModeRadios && displayModeRadios.length) {
         });
     });
 }
+
+// 初始化 VU Meter（若畫布存在），並綁定 analyser
+(function initVUMeter(){
+    var vuCanvas = document.getElementById('vu-meter');
+    if (vuCanvas) {
+        vuMeter = new VUMeter(vuCanvas, analyser);
+        // 嘗試啟動動畫循環；若 analyser 尚未就緒，之後也會更新
+        vuMeter.start();
+    }
+})();
 
 // 錄音狀態控制變數
 var is_ready_to_record = true;   // 是否準備好錄音
@@ -118,6 +144,7 @@ var overviewWaveform = null;      // 全局波形顯示器實例
 var latestRecordingBlob = null;   // 最近一次錄音的 Blob
 var latestRecordingUrl = null;    // 最近一次錄音的 Object URL
 var accumulatedControlsBound = false; // 是否已綁定累積波形互動
+var vuMeter = null;               // VU Meter 實例
 
 // 區域選取相關變數
 var selectionStart = null;        // 選取起始樣本索引
@@ -226,6 +253,11 @@ function initializeAudioContext() {
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 256; // 設定 FFT 大小
 
+        // 將 analyser 提供給 VU Meter（若已建立）
+        if (vuMeter) {
+            vuMeter.analyser = analyser;
+        }
+
         // 為了讓音訊節點圖保有出口，避免回授的同時保持數據流
         analyserSilencer = audioContext.createGain();
         analyserSilencer.gain.value = 0;
@@ -277,6 +309,146 @@ function LiveWaveform(canvas, analyserNode) {
     this._lastDataArray = null;
     this._verticalScrollOffset = 0; // 累積的垂直滾動偏移（像素）
 }
+
+/* ================================================================
+ * VUMeter 類 - 即時音量 (RMS/Peak) 顯示
+ * - 計算 RMS 與 Peak，轉換為 dB 值 (-60dB ~ 0dB)
+ * - 提供 peak hold 功能：峰值維持一段時間後緩降
+ * - 支援水平與垂直模式的固定寬高繪製
+ * ================================================================ */
+function VUMeter(canvas, analyserNode) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.analyser = analyserNode;
+    this.bufferLength = 2048; // 用較大緩衝增加 RMS 精度
+    this.timeData = new Uint8Array(this.bufferLength);
+    this.levelDb = -60;       // 目前 RMS dB
+    this.peakDb = -60;        // 目前峰值 dB
+    this.holdPeakDb = -60;    // Peak hold 顯示值
+    this.lastPeakTime = 0;    // 最近一次更新峰值的時間戳
+    this.peakHoldMillis = 1500; // 峰值保持時間
+    this.fallRateDbPerSec = 20; // 峰值下降速度 (dB/s)
+    this.minDb = -60;
+    this.maxDb = 0;
+    this.animationId = null;
+}
+
+VUMeter.prototype._computeLevels = function() {
+    if (!this.analyser) return { rmsDb: -60, peakDb: -60 };
+    // 讀取時域資料（8-bit）
+    this.analyser.getByteTimeDomainData(this.timeData);
+    var sumSquares = 0;
+    var peak = 0;
+    for (var i = 0; i < this.bufferLength; i++) {
+        var v = (this.timeData[i] - 128) / 128.0; // -1..1
+        sumSquares += v * v;
+        var absV = Math.abs(v);
+        if (absV > peak) peak = absV;
+    }
+    var rms = Math.sqrt(sumSquares / this.bufferLength);
+    // 轉 dB：20 * log10(rms)，避免 log(0)
+    var rmsDb = rms > 0 ? 20 * Math.log10(rms) : this.minDb;
+    var peakDb = peak > 0 ? 20 * Math.log10(peak) : this.minDb;
+    if (rmsDb < this.minDb) rmsDb = this.minDb;
+    if (rmsDb > this.maxDb) rmsDb = this.maxDb;
+    if (peakDb < this.minDb) peakDb = this.minDb;
+    if (peakDb > this.maxDb) peakDb = this.maxDb;
+    return { rmsDb: rmsDb, peakDb: peakDb };
+};
+
+VUMeter.prototype.resize = function() {
+    // 可在模式切換後呼叫，這裡僅確保清除
+    this.clear();
+};
+
+VUMeter.prototype.clear = function() {
+    this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height);
+};
+
+VUMeter.prototype.draw = function(currentDb) {
+    var ctx = this.ctx;
+    var w = this.canvas.width;
+    var h = this.canvas.height;
+    // 背景
+    ctx.clearRect(0,0,w,h);
+    var grd = ctx.createLinearGradient(0,0,w,0);
+    grd.addColorStop(0,'#2d3748');
+    grd.addColorStop(1,'#1a202c');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0,0,w,h);
+
+    // 將 dB 對應到 0~1
+    var norm = (currentDb - this.minDb) / (this.maxDb - this.minDb);
+    if (norm < 0) norm = 0; if (norm > 1) norm = 1;
+
+    // 彩色漸層 (綠->黃->紅)
+    var barGrad = ctx.createLinearGradient(0,0,w,0);
+    barGrad.addColorStop(0,'#38a169');
+    barGrad.addColorStop(0.6,'#d69e2e');
+    barGrad.addColorStop(0.85,'#dd6b20');
+    barGrad.addColorStop(1,'#c53030');
+    ctx.fillStyle = barGrad;
+    var barWidth = Math.round(w * norm);
+    ctx.fillRect(0,0,barWidth,h);
+
+    // 峰值 hold 指示線
+    var holdNorm = (this.holdPeakDb - this.minDb) / (this.maxDb - this.minDb);
+    if (holdNorm < 0) holdNorm = 0; if (holdNorm > 1) holdNorm = 1;
+    var holdX = Math.round(w * holdNorm);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(holdX + 0.5,0);
+    ctx.lineTo(holdX + 0.5,h);
+    ctx.stroke();
+
+    // 文字顯示 (RMS dB / Peak dB)
+    ctx.fillStyle = '#f0f0f0';
+    ctx.font = 'bold 12px -apple-system,Segoe UI,sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    var txt = 'RMS ' + currentDb.toFixed(1) + ' dB   Peak ' + this.peakDb.toFixed(1) + ' dB';
+    ctx.fillText(txt, 8, h/2);
+};
+
+VUMeter.prototype.update = function() {
+    var levels = this._computeLevels();
+    this.levelDb = levels.rmsDb;
+    this.peakDb = levels.peakDb;
+
+    var now = performance.now();
+    // 更新 peak hold
+    if (this.peakDb > this.holdPeakDb + 0.5) { // 新峰值（加點 hysteresis）
+        this.holdPeakDb = this.peakDb;
+        this.lastPeakTime = now;
+    } else {
+        // 若超過保持時間，開始下降
+        var elapsed = now - this.lastPeakTime;
+        if (elapsed > this.peakHoldMillis) {
+            var fallSeconds = (elapsed - this.peakHoldMillis) / 1000;
+            var fallAmount = this.fallRateDbPerSec * fallSeconds;
+            this.holdPeakDb = Math.max(this.peakDb, this.holdPeakDb - fallAmount);
+        }
+    }
+    this.draw(this.levelDb);
+};
+
+VUMeter.prototype.start = function() {
+    var self = this;
+    function loop(){
+        self.update();
+        self.animationId = requestAnimationFrame(loop);
+    }
+    if (!this.animationId) loop();
+};
+
+VUMeter.prototype.stop = function() {
+    if (this.animationId) {
+        cancelAnimationFrame(this.animationId);
+        this.animationId = null;
+    }
+    this.clear();
+};
 
 /**
  * 開始即時波形顯示
@@ -357,6 +529,11 @@ LiveWaveform.prototype.draw = function() {
     this.animationId = requestAnimationFrame(this.draw.bind(this));
 
     this.analyser.getByteTimeDomainData(this.dataArray); // 取得時域資料
+    // 推進 VU Meter（若存在），以即時資料計算等級
+    if (vuMeter && typeof vuMeter.update === 'function') {
+        // 若 VU meter 有綁 analyser，就讓它自行讀取；否則這裡也可擴充成傳遞 dataArray。
+        vuMeter.update();
+    }
 
     if (!orientationManager.isVertical()) {
         // 水平模式：與原本相同
@@ -2574,6 +2751,17 @@ function startRecording() {
                 bindOverviewWaveformInteractions(overviewCanvas);
             }
 
+            // 若 VU Meter 尚未綁定 analyser（第一次錄音前初始化），此處再確保連結並重啟
+            var vuCanvas = document.getElementById('vu-meter');
+            if (vuCanvas) {
+                if (!vuMeter) {
+                    vuMeter = new VUMeter(vuCanvas, analyser);
+                } else {
+                    vuMeter.analyser = analyser;
+                }
+                vuMeter.start();
+            }
+
             // 根據目前模式，套用對應尺寸與重繪（確保垂直模式立即生效）
             applyDisplayMode();
 
@@ -2670,6 +2858,11 @@ function stopRecording() {
     toggleButton.classList.remove('recording');
     toggleButton.innerHTML = '● 開始錄音';
     // 等待 stopRecordingCallback 生成 blob 後再啟用播放
+
+    // 停止 VU Meter 更新（保留最後畫面供參考）
+    if (vuMeter) {
+        vuMeter.stop();
+    }
 }
 
 if (downloadButton) {

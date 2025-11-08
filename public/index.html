@@ -48,13 +48,16 @@
 <!-- 波形容器：支援水平與垂直模式 -->
 <div id="waveform-wrapper" class="waveform-wrapper mode-horizontal">
     <div class="waveform-col overview-col">
-        <canvas id="overview-waveform" width="750" height="80"></canvas>
+        <canvas class="wave-canvas" id="overview-waveform" width="750" height="80"></canvas>
     </div>
     <div class="waveform-col accumulated-col">
-        <canvas id="accumulated-waveform" width="750" height="140"></canvas>
+        <canvas class="wave-canvas" id="accumulated-waveform" width="750" height="140"></canvas>
     </div>
     <div class="waveform-col live-col">
-        <canvas id="waveform" width="750" height="200"></canvas>
+        <canvas class="wave-canvas" id="waveform" width="750" height="200"></canvas>
+        <div class="vu-container">
+            <canvas id="vu-meter" width="750" height="24" aria-label="VU Meter"></canvas>
+        </div>
     </div>
 </div>
 
