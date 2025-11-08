@@ -24,14 +24,12 @@
     <div id="mini-level-bar"></div>
 </div>
 
-<!-- 波形容器：支援水平與垂直模式 -->
+<!-- c：支援水平與垂直模式 -->
 
 <div id="waveform-wrapper" class="waveform-wrapper mode-horizontal">
     <div class="waveform-col overview-col" style="grid-column: 1;">
         <canvas class="wave-canvas" id="overview-waveform" width="750" height="80"></canvas>
     </div>
-    <!-- 顯示錄音時長與樣本數的區域 -->
-    <h3 id="recording-duration">錄音時長：00:00.000 | 樣本數：0</h3>
     <div class="waveform-col accumulated-col" style="grid-column: 2;">
         <canvas class="wave-canvas" id="accumulated-waveform" width="750" height="140"></canvas>
     </div>
@@ -39,6 +37,9 @@
         <canvas class="wave-canvas" id="waveform" width="750" height="200"></canvas>
     </div>
 </div>
+
+<!-- 顯示錄音時長與樣本數的區域 -->
+<h3 id="recording-duration">錄音時長：00:00.000 | 樣本數：0</h3>
 
 <!-- 波形下方操作列：錄音/播放/控制按鈕 -->
 <div id="waveform-action-bar" class="waveform-action-bar" style="max-width:750px;margin:12px auto 8px;display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;align-items:center;">
