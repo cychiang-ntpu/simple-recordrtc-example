@@ -3873,9 +3873,9 @@ function stopRecordingCallback() {
                 accumulatedWaveform.zoomFactor = totalSamples / windowSamples;
                 accumulatedWaveform.viewStart = 0;
                 accumulatedWaveform.isAutoScroll = false;
-                // 設定選取區（若總長度不足 1 秒則選取整段）
-                selectionStart = 0;
-                selectionEnd = Math.min(totalSamples - 1, windowSamples);
+                // 不建立初始選取區：清除選取
+                selectionStart = null;
+                selectionEnd = null;
                 accumulatedWaveform._enforceViewBounds();
                 accumulatedWaveform.draw();
                 updatePlaybackButtonsState();
@@ -4381,7 +4381,7 @@ function finalizeWorkletRecording(){
         audio.srcObject = null;
         audio.src = latestRecordingUrl;
         try { audio.muted = false; audio.controls = true; } catch(e){}
-        // 建立預設視窗選取
+        // 設定預設視窗（不建立選取區）
         try {
             if (accumulatedWaveform && accumulatedWaveform.sampleCount>0 && audioContext) {
                 var effRate = (accumulatedWaveform.sourceSampleRate || audioContext.sampleRate)/Math.max(1, accumulatedWaveform.decimationFactor||1);
@@ -4391,8 +4391,9 @@ function finalizeWorkletRecording(){
                 accumulatedWaveform.zoomFactor = totalS / windowSamples;
                 accumulatedWaveform.viewStart = 0;
                 accumulatedWaveform.isAutoScroll = false;
-                selectionStart = 0;
-                selectionEnd = Math.min(totalS - 1, windowSamples);
+                // 清除任何既有選取區
+                selectionStart = null;
+                selectionEnd = null;
                 accumulatedWaveform._enforceViewBounds();
                 accumulatedWaveform.draw();
             }
