@@ -139,10 +139,10 @@
 
 <br>
 
-<!-- HTML5 音頻播放控制器
-     - controls: 顯示播放控制界面
-     - playsinline: 在移動設備上內聯播放 -->
-<audio controls playsinline></audio>
+<!-- HTML5 音頻播放控制器：改為預設 muted、無 controls，避免 iOS 將情境歸類為「同時播放」導致輸入衰減。
+    - 稍後在載入錄音 Blob 後再解除 muted 並加上 controls。
+    - playsinline: 在移動設備上內聯播放 -->
+<audio id="playback-audio" muted playsinline preload="none"></audio>
 
 
 <!-- 引入 RecordRTC 錄音庫 -->

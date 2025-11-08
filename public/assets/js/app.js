@@ -4,7 +4,7 @@
  *================================================================*/
 
 // DOM 元素引用
-var audio = document.querySelector('audio');                    // 主要音頻播放元素
+var audio = document.getElementById('playback-audio') || document.querySelector('audio');                    // 主要音頻播放元素
 var downloadButton = document.getElementById('btn-download-recording');     // 下載按鈕
 var btnPlay = document.getElementById('btn-play');             // 播放
 var btnPause = document.getElementById('btn-pause');           // 暫停
@@ -2159,6 +2159,20 @@ function captureMicrophone(callback) {
     var agcToggle = document.getElementById('agc-toggle');
     var agcEnabled = agcToggle ? agcToggle.checked : false;
 
+    // iOS 上若 AGC 關閉常見錄音音量偏低；若使用者尚未自訂增益 (保持預設 2.5x) 則自動提升到 3.5x
+    try {
+        var ua = navigator.userAgent || '';
+        var isIOS = /iphone|ipad|ipod/i.test(ua);
+        if (isIOS && !agcEnabled && micGainUserFactor && Math.abs(micGainUserFactor - 2.5) < 0.0001) {
+            micGainUserFactor = 3.5;
+            var gainSlider = document.getElementById('mic-gain');
+            var gainValue = document.getElementById('mic-gain-value');
+            if (gainSlider) { gainSlider.value = micGainUserFactor; }
+            if (gainValue) { gainValue.textContent = micGainUserFactor.toFixed(1) + 'x'; }
+            showToast('iOS: 已自動提升 Mic Gain 至 3.5x');
+        }
+    } catch(e){}
+
     var audioConstraints = {
         echoCancellation: false,
         noiseSuppression: false,
@@ -3265,9 +3279,11 @@ function stopRecordingCallback() {
         latestRecordingBlob = blob;
         latestRecordingUrl = URL.createObjectURL(blob);
 
-        // 將音頻載入到主播放器
-        audio.srcObject = null;
-        audio.src = latestRecordingUrl;
+    // 將音頻載入到主播放器
+    audio.srcObject = null;
+    audio.src = latestRecordingUrl;
+    // 錄音完成後才解除 muted 並顯示控制列，避免 iOS 將情境視為邊錄邊播而降低輸入音量
+    try { audio.muted = false; audio.controls = true; } catch(e){}
 
     // 錄音完成後預設顯示 defaultWindowSeconds 秒視窗（若總長度 >= 該秒數），並建立選取區
         try {
