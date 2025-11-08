@@ -46,26 +46,19 @@ function applyDisplayMode(){
     var vuCanvas = document.getElementById('vu-meter');
 
     if(orientationManager.isVertical()){
-        // 垂直模式：外觀高度使用 CSS 80vh，JS 設定像素尺寸以便繪製清晰度（含 devicePixelRatio）
+        // 垂直模式：只需要 overview + accumulated；live 隱藏（CSS 已 display:none）
         var dpr = window.devicePixelRatio || 1;
-        var targetH = Math.round(window.innerHeight * 0.80); // 80vh
-        // 寬度依容器 flex 分配，暫時用目前 offsetWidth
-        [overviewCanvas, accumCanvas, liveCanvas].forEach(function(c){
+        var targetH = Math.round(window.innerHeight * 0.80); // 80vh 高度
+        [overviewCanvas, accumCanvas].forEach(function(c){
             if(!c) return;
-            var cssW = c.clientWidth || 300;
+            var cssW = c.clientWidth || 240;
             c.width = Math.round(cssW * dpr);
             c.height = Math.round(targetH * dpr);
-            // 以 CSS 控制視覺大小，維持寬高比：高度填滿 100%
             c.style.height = '100%';
         });
-        // 清空 live 並重置垂直捲動偏移
-        if(liveWaveform){
-            liveWaveform.width = liveCanvas.width;
-            liveWaveform.height = liveCanvas.height;
-            var ctxV = liveWaveform.canvasContext;
-            ctxV.fillStyle = '#f0f0f0';
-            ctxV.fillRect(0,0,liveWaveform.width, liveWaveform.height);
-            liveWaveform._verticalScrollOffset = 0;
+        // 若存在 liveWaveform，暫停其繪製循環（節省資源）
+        if (liveWaveform && typeof liveWaveform.stop === 'function') {
+            try { liveWaveform.stop(); } catch(e){}
         }
     } else {
         // 水平模式：回復原先 HTML 設定的寬高 (750 固定寬，個別高度)
@@ -91,8 +84,11 @@ function applyDisplayMode(){
         overviewWaveform.draw();
     }
     if(liveWaveform){
-        liveWaveform.width = liveCanvas.width;
-        liveWaveform.height = liveCanvas.height;
+        // 垂直模式下不重繪 live；水平模式才更新
+        if(!orientationManager.isVertical()){
+            liveWaveform.width = liveCanvas.width;
+            liveWaveform.height = liveCanvas.height;
+        }
     }
 
     // 調整 VU Meter 畫布像素尺寸以符合當前 CSS 尺寸與 DPR

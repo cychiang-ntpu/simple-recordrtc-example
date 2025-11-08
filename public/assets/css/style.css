@@ -59,10 +59,10 @@ html {
     padding: 6px;
 }
 
-/* 左→右：overview | accumulated | live（DOM 已是此順序，這裡設定比例寬度） */
-#waveform-wrapper.mode-vertical .overview-col { flex: 0 0 22%; min-width: 180px; }
+/* 左→右：overview | accumulated（live 在垂直模式隱藏） */
+#waveform-wrapper.mode-vertical .overview-col { flex: 0 0 22%; min-width: 160px; }
 #waveform-wrapper.mode-vertical .accumulated-col { flex: 1 1 0; min-width: 260px; }
-#waveform-wrapper.mode-vertical .live-col { flex: 0 0 28%; min-width: 220px; }
+#waveform-wrapper.mode-vertical .live-col { display: none; }
 
 #waveform-wrapper.mode-vertical canvas {
     width: 100% !important;
@@ -73,6 +73,11 @@ html {
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
+}
+
+/* 移除在手機/平板樣式對單一 canvas 設定的外邊距，讓兩欄緊貼填滿 */
+#waveform-wrapper.mode-vertical .waveform-col .wave-canvas {
+    margin: 0 !important;
 }
 
 /* 頂部 VU Meter 基礎樣式（所有裝置共用，置於所有波形上方） */
