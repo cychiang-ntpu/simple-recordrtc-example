@@ -547,16 +547,16 @@ html {
         width: calc(100% - 16px);
         max-width: 100%;
         margin: 0;
-        padding: 16px 20px;
+        padding: 10px 12px;
         border: none;
-        border-radius: 10px;
+        border-radius: 8px;
         cursor: pointer;
-        font-size: 15px;
+        font-size: 13px;
         font-weight: 600;
-        min-height: 50px;
+        min-height: 38px;
         touch-action: manipulation;
         transition: all 0.3s ease;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+        box-shadow: 0 3px 6px rgba(0, 0, 0, 0.1);
         /* 允許按鈕文字選取但防止縮放 */
         -webkit-user-select: text;
         -moz-user-select: text;
@@ -852,6 +852,21 @@ html {
     #btn-clear-selection:disabled {
         opacity: .35;
         cursor: not-allowed;
+    }
+    
+    /* waveform-action-bar 內的按鈕進一步優化（手機端） */
+    .waveform-action-bar button {
+        flex: 1 1 calc(50% - 4px);
+        max-width: calc(50% - 4px);
+        min-width: 120px;
+        padding: 8px 10px;
+        font-size: 12px;
+        min-height: 36px;
+    }
+    
+    .waveform-action-bar #btn-download-recording {
+        flex: 1 1 100%;
+        max-width: 100%;
     }
     
     .waveform-toolbar .hint {
