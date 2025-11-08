@@ -30,24 +30,33 @@
     <small class="agc-hint">關閉可減少錄音啟動延遲，但音量可能較小且不穩定</small>
 </div>
 
-<!-- 錄音控制按鈕區域 -->
+<!-- 錄音與顯示模式控制按鈕區域 -->
 <div class="button-container">
     <button id="btn-toggle-recording" class="recording-toggle">● 開始錄音</button>
     <button id="btn-play" class="play-button" disabled>▶ 播放</button>
     <button id="btn-pause" disabled>⏸ 暫停</button>
     <button id="btn-stop-playback" disabled>⏹ 停止</button>
+    <button id="btn-jump-start" disabled>⏮ 回到開始</button>
     <button id="btn-clear-selection" disabled>✕ 取消選取區間</button>
     <button id="btn-download-recording" disabled>下載錄音</button>
+    <div class="display-mode-toggle">
+        <label><input type="radio" name="display-mode" value="horizontal" checked> 水平模式</label>
+        <label><input type="radio" name="display-mode" value="vertical"> 垂直模式</label>
+    </div>
 </div>
 
-<!-- 即時波形顯示 -->
-<canvas id="waveform" width="750" height="200"></canvas>
-
-<!-- 累積波形顯示 -->
-<canvas id="accumulated-waveform" width="750" height="140"></canvas>
-
-<!-- 全局波形顯示 (縮覽圖) -->
-<canvas id="overview-waveform" width="750" height="80"></canvas>
+<!-- 波形容器：支援水平與垂直模式 -->
+<div id="waveform-wrapper" class="waveform-wrapper mode-horizontal">
+    <div class="waveform-col overview-col">
+        <canvas id="overview-waveform" width="750" height="80"></canvas>
+    </div>
+    <div class="waveform-col accumulated-col">
+        <canvas id="accumulated-waveform" width="750" height="140"></canvas>
+    </div>
+    <div class="waveform-col live-col">
+        <canvas id="waveform" width="750" height="200"></canvas>
+    </div>
+</div>
 
 <div id="accumulated-toolbar" class="waveform-toolbar">
     <button type="button" id="accum-pan-left">&larr; 向左</button>
@@ -65,13 +74,6 @@
      - playsinline: 在移動設備上內聯播放 -->
 <audio controls playsinline></audio>
 
-<!-- 分隔線 -->
-<hr>
-
-<!-- 錄音片段容器：用於顯示所有錄音片段及其波形 -->
-<div id="audio-blobs-container" style="margin-top: 20px;">
-    <h2 style="margin-bottom: 20px;">Audio Blobs Goes Here:</h2>
-</div>
 
 <!-- 引入 RecordRTC 錄音庫 -->
 <script src="assets/js/RecordRTC.js"></script>

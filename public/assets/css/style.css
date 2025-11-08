@@ -32,6 +32,63 @@ html {
 }
 
 /* ================================================================
+ * 垂直模式版面（所有裝置共用）
+ * - 三個波形區塊橫向排列：overview | accumulated | live
+ * - 每個區塊高度 80vh，canvas 填滿容器
+ * ================================================================ */
+#waveform-wrapper.mode-vertical {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    margin: 12px auto;
+    overflow-x: auto; /* 螢幕過窄時可水平捲動 */
+}
+
+#waveform-wrapper.mode-vertical .waveform-col {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: stretch;
+    height: 80vh; /* 關鍵：垂直模式高度 ~80% 視窗高 */
+    background: linear-gradient(135deg, #ffffff 0%, #f7fafc 100%);
+    border-radius: 12px;
+    box-shadow: 0 6px 12px rgba(0,0,0,0.08);
+    padding: 6px;
+}
+
+/* 左→右：overview | accumulated | live（DOM 已是此順序，這裡設定比例寬度） */
+#waveform-wrapper.mode-vertical .overview-col { flex: 0 0 22%; min-width: 180px; }
+#waveform-wrapper.mode-vertical .accumulated-col { flex: 1 1 0; min-width: 260px; }
+#waveform-wrapper.mode-vertical .live-col { flex: 0 0 28%; min-width: 220px; }
+
+#waveform-wrapper.mode-vertical canvas {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+    border: 2px solid #e2e8f0;
+    border-radius: 10px;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* 在垂直模式下，避免外層媒體查詢中的固定高度干擾（提高優先級） */
+@media screen and (max-width: 1024px) {
+    #waveform-wrapper.mode-vertical canvas {
+        height: 100% !important; /* 強制覆蓋平板/手機針對 canvas 的固定高度 */
+    }
+}
+
+@media screen and (min-width: 1025px) {
+    #waveform-wrapper.mode-vertical canvas {
+        height: 100% !important; /* 強制覆蓋桌機針對 canvas 的固定高度 */
+    }
+}
+
+/* ================================================================
  * 手機樣式（預設，480px 以下）
  * 專為小螢幕優化的垂直佈局
  * ================================================================ */
@@ -165,6 +222,22 @@ html {
         transition: all 0.3s ease;
     }
     
+    
+    /* 顯示模式切換 */
+    .display-mode-toggle {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 6px 8px;
+        background: #f7fafc;
+        border-radius: 8px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+        margin-top: 4px;
+    }
+    .display-mode-toggle label { font-size: 14px; color: #4a5568; }
+    .display-mode-toggle input { accent-color: #667eea; }
     #btn-toggle-recording.recording {
         background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
         animation: pulse 1.5s ease-in-out infinite;
@@ -455,21 +528,7 @@ html {
         min-height: 44px;
     }
     
-    /* 錄音片段容器 */
-    #audio-blobs-container {
-        margin: 15px 8px 20px;
-        padding: 15px 12px;
-        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
-        border-radius: 12px;
-        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
-        border: 2px solid #e2e8f0;
-    }
-    
-    #audio-blobs-container h2 {
-        font-size: 1rem;
-        margin-bottom: 12px;
-        padding: 8px 12px;
-    }
+    /* 移除：錄音片段容器（已不使用） */
     
     /* 分隔線 */
     hr {
@@ -921,20 +980,7 @@ html {
         transform: translateY(-2px);
     }
     
-    /* 錄音片段容器 */
-    #audio-blobs-container {
-        margin: 25px auto 30px;
-        padding: 25px 20px;
-        max-width: 700px;
-        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
-        border-radius: 15px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-        border: 2px solid #e2e8f0;
-    }
-    
-    #audio-blobs-container h2 {
-        margin-bottom: 20px;
-    }
+    /* 移除：錄音片段容器（已不使用） */
     
     /* 分隔線 */
     hr {
@@ -1402,20 +1448,7 @@ html {
         box-shadow: 0 3px 8px rgba(102, 126, 234, 0.3);
     }
     
-    /* 錄音片段容器 */
-    #audio-blobs-container {
-        margin: 35px auto 40px;
-        padding: 30px 35px;
-        max-width: 950px;
-        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
-        border-radius: 18px;
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
-        border: 2px solid #e2e8f0;
-    }
-    
-    #audio-blobs-container h2 {
-        margin-bottom: 25px;
-    }
+    /* 移除：錄音片段容器（已不使用） */
     
     /* 分隔線 */
     hr {

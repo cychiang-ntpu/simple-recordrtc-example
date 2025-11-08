@@ -5,12 +5,101 @@
 
 // DOM 元素引用
 var audio = document.querySelector('audio');                    // 主要音頻播放元素
-var audioBlobsContainer = document.querySelector('#audio-blobs-container'); // 錄音片段容器
 var downloadButton = document.getElementById('btn-download-recording');     // 下載按鈕
 var btnPlay = document.getElementById('btn-play');             // 播放
 var btnPause = document.getElementById('btn-pause');           // 暫停
 var btnStopPlayback = document.getElementById('btn-stop-playback'); // 停止播放
 var btnClearSelection = document.getElementById('btn-clear-selection'); // 取消選取
+var btnJumpStart = document.getElementById('btn-jump-start'); // 回到開始
+var displayModeRadios = document.querySelectorAll('input[name="display-mode"]'); // 顯示模式切換
+
+// 簡單方向管理器（先掛鉤 UI，之後再逐步導入渲染）
+var orientationManager = {
+    mode: 'horizontal',
+    setMode: function(m){
+        if(m !== 'horizontal' && m !== 'vertical') return;
+        if(this.mode === m) return;
+        this.mode = m;
+        applyDisplayMode();
+    },
+    isVertical: function(){ return this.mode === 'vertical'; }
+};
+
+// 視窗尺寸變動時，垂直模式需同步更新 canvas 寬高
+window.addEventListener('resize', function(){
+    if (orientationManager && orientationManager.isVertical && orientationManager.isVertical()) {
+        applyDisplayMode();
+    }
+});
+
+function applyDisplayMode(){
+    var wrapper = document.getElementById('waveform-wrapper');
+    if(!wrapper) return;
+    wrapper.classList.remove('mode-horizontal','mode-vertical');
+    wrapper.classList.add('mode-' + orientationManager.mode);
+    // 動態調整三個 canvas 尺寸（依模式）
+    var overviewCanvas = document.getElementById('overview-waveform');
+    var accumCanvas = document.getElementById('accumulated-waveform');
+    var liveCanvas = document.getElementById('waveform');
+
+    if(orientationManager.isVertical()){
+        // 垂直模式：外觀高度使用 CSS 80vh，JS 設定像素尺寸以便繪製清晰度（含 devicePixelRatio）
+        var dpr = window.devicePixelRatio || 1;
+        var targetH = Math.round(window.innerHeight * 0.80); // 80vh
+        // 寬度依容器 flex 分配，暫時用目前 offsetWidth
+        [overviewCanvas, accumCanvas, liveCanvas].forEach(function(c){
+            if(!c) return;
+            var cssW = c.clientWidth || 300;
+            c.width = Math.round(cssW * dpr);
+            c.height = Math.round(targetH * dpr);
+            // 以 CSS 控制視覺大小，維持寬高比：高度填滿 100%
+            c.style.height = '100%';
+        });
+        // 清空 live 並重置垂直捲動偏移
+        if(liveWaveform){
+            liveWaveform.width = liveCanvas.width;
+            liveWaveform.height = liveCanvas.height;
+            var ctxV = liveWaveform.canvasContext;
+            ctxV.fillStyle = '#f0f0f0';
+            ctxV.fillRect(0,0,liveWaveform.width, liveWaveform.height);
+            liveWaveform._verticalScrollOffset = 0;
+        }
+    } else {
+        // 水平模式：回復原先 HTML 設定的寬高 (750 固定寬，個別高度)
+        if(overviewCanvas){ overviewCanvas.width = 750; overviewCanvas.height = 80; }
+        if(accumCanvas){ accumCanvas.width = 750; accumCanvas.height = 140; }
+        if(liveCanvas){ liveCanvas.width = 750; liveCanvas.height = 200; }
+        if(liveWaveform){
+            liveWaveform.width = liveCanvas.width;
+            liveWaveform.height = liveCanvas.height;
+            liveWaveform.canvasContext.clearRect(0,0,liveWaveform.width, liveWaveform.height);
+        }
+    }
+
+    // 更新各 waveform 物件內部寬高參考並重繪
+    if(accumulatedWaveform){
+        accumulatedWaveform.width = accumCanvas.width;
+        accumulatedWaveform.height = accumCanvas.height;
+        accumulatedWaveform.draw();
+    }
+    if(overviewWaveform){
+        overviewWaveform.width = overviewCanvas.width;
+        overviewWaveform.height = overviewCanvas.height;
+        overviewWaveform.draw();
+    }
+    if(liveWaveform){
+        liveWaveform.width = liveCanvas.width;
+        liveWaveform.height = liveCanvas.height;
+    }
+}
+
+if (displayModeRadios && displayModeRadios.length) {
+    displayModeRadios.forEach(function(radio){
+        radio.addEventListener('change', function(){
+            orientationManager.setMode(this.value);
+        });
+    });
+}
 
 // 錄音狀態控制變數
 var is_ready_to_record = true;   // 是否準備好錄音
@@ -81,6 +170,7 @@ function updatePlaybackButtonsState() {
         btnPause.disabled = true;
         btnStopPlayback.disabled = true;
         if (btnClearSelection) btnClearSelection.disabled = true;
+        if (btnJumpStart) btnJumpStart.disabled = true;
         return;
     }
 
@@ -90,6 +180,7 @@ function updatePlaybackButtonsState() {
         btnPause.disabled = true;
         btnStopPlayback.disabled = true;
         if (btnClearSelection) btnClearSelection.disabled = (selectionStart === null || selectionEnd === null || selectionStart === selectionEnd);
+        if (btnJumpStart) btnJumpStart.disabled = true;
         return;
     }
 
@@ -99,6 +190,7 @@ function updatePlaybackButtonsState() {
         btnPause.disabled = false;
         btnStopPlayback.disabled = false;
         if (btnClearSelection) btnClearSelection.disabled = (selectionStart === null || selectionEnd === null || selectionStart === selectionEnd);
+        if (btnJumpStart) btnJumpStart.disabled = false;
         return;
     }
 
@@ -109,6 +201,7 @@ function updatePlaybackButtonsState() {
     var canStop = !!(accumulatedWaveform && (accumulatedWaveform.playbackPosition > 0 || (selectionStart !== null && selectionEnd !== null)));
     btnStopPlayback.disabled = !canStop;
     if (btnClearSelection) btnClearSelection.disabled = (selectionStart === null || selectionEnd === null || selectionStart === selectionEnd);
+    if (btnJumpStart) btnJumpStart.disabled = !(accumulatedWaveform && accumulatedWaveform.playbackPosition > 0);
 }
 
 // 初始化時更新一次按鈕狀態
@@ -179,6 +272,10 @@ function LiveWaveform(canvas, analyserNode) {
     
     // 振幅放大倍率（用於顯示微弱訊號）
     this.amplification = 3.0;
+
+    // 垂直模式暫存：保留最近一個繪製的資料，用於滾動繪製優化
+    this._lastDataArray = null;
+    this._verticalScrollOffset = 0; // 累積的垂直滾動偏移（像素）
 }
 
 /**
@@ -261,50 +358,95 @@ LiveWaveform.prototype.draw = function() {
 
     this.analyser.getByteTimeDomainData(this.dataArray); // 取得時域資料
 
-    this.canvasContext.fillStyle = '#f0f0f0';
-    this.canvasContext.fillRect(0, 0, this.width, this.height);
+    if (!orientationManager.isVertical()) {
+        // 水平模式：與原本相同
+        this.canvasContext.fillStyle = '#f0f0f0';
+        this.canvasContext.fillRect(0, 0, this.width, this.height);
 
-    // 中央基準線讓波形視覺上置中
-    this.canvasContext.strokeStyle = '#d0d0d0';
-    this.canvasContext.lineWidth = 1;
-    this.canvasContext.beginPath();
-    this.canvasContext.moveTo(0, this.height / 2);
-    this.canvasContext.lineTo(this.width, this.height / 2);
-    this.canvasContext.stroke();
+        // 中央基準線讓波形視覺上置中
+        this.canvasContext.strokeStyle = '#d0d0d0';
+        this.canvasContext.lineWidth = 1;
+        this.canvasContext.beginPath();
+        this.canvasContext.moveTo(0, this.height / 2);
+        this.canvasContext.lineTo(this.width, this.height / 2);
+        this.canvasContext.stroke();
 
-    this.canvasContext.lineWidth = 2;
-    this.canvasContext.strokeStyle = '#4CAF50';
-    this.canvasContext.beginPath();
+        this.canvasContext.lineWidth = 2;
+        this.canvasContext.strokeStyle = '#4CAF50';
+        this.canvasContext.beginPath();
 
-    var sliceWidth = this.width / this.bufferLength;
-    var x = 0;
-    var centerY = this.height / 2;
+        var sliceWidth = this.width / this.bufferLength;
+        var x = 0;
+        var centerY = this.height / 2;
 
-    for (var i = 0; i < this.bufferLength; i++) {
-        var normalized = (this.dataArray[i] - 128) / 128.0; // 將數值轉為 -1 到 1
-        
-        // 應用振幅放大
-        normalized = normalized * this.amplification;
-        
-        // 限制範圍在 -1 到 1
-        if (normalized > 1) {
-            normalized = 1;
-        } else if (normalized < -1) {
-            normalized = -1;
+        for (var i = 0; i < this.bufferLength; i++) {
+            var normalized = (this.dataArray[i] - 128) / 128.0; // 將數值轉為 -1 到 1
+            normalized = normalized * this.amplification;      // 放大
+            if (normalized > 1) normalized = 1; else if (normalized < -1) normalized = -1;
+            var y = centerY + normalized * centerY;
+            if (i === 0) {
+                this.canvasContext.moveTo(x, y);
+            } else {
+                this.canvasContext.lineTo(x, y);
+            }
+            x += sliceWidth;
+        }
+        this.canvasContext.stroke();
+    } else {
+        // 垂直模式：時間向下延伸，新樣本在下方。
+        // 策略：整個畫布往上平移一行高度，再在底部繪製最新波形橫條。
+        var ctx = this.canvasContext;
+        var w = this.width;
+        var h = this.height;
+        var centerX = w / 2;
+        // 計算本次波形的「條帶高度」，取決於 bufferLength vs width。這裡直接使用 1 像素，簡化呈現並保證平滑滾動。
+        var bandHeight = 1; // 每次更新下移 1px
+
+        // 使用 drawImage 將既有內容整體上移（避免昂貴的 getImageData/putImageData 讀回）
+        // 將畫布自身作為來源，來源區域從 y=bandHeight 到底，繪製到 y=0
+        ctx.drawImage(this.canvas, 0, bandHeight, w, h - bandHeight, 0, 0, w, h - bandHeight);
+        // 填底部背景
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, h - bandHeight, w, bandHeight);
+
+        // 在底部畫中心基準線（僅當 bandHeight 足夠時，或每 N 幀畫一次）
+        // 這裡簡化：每 40 條畫一次灰線，避免過度密集
+        this._verticalScrollOffset = (this._verticalScrollOffset + bandHeight) % 40;
+        if (this._verticalScrollOffset === 0) {
+            ctx.strokeStyle = '#d0d0d0';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, h - bandHeight - 0.5);
+            ctx.lineTo(w, h - bandHeight - 0.5);
+            ctx.stroke();
         }
 
-        var y = centerY + normalized * centerY;             // 以畫布中心為基準上下擺動
-
-        if (i === 0) {
-            this.canvasContext.moveTo(x, y);
-        } else {
-            this.canvasContext.lineTo(x, y);
+        // 在底部繪製最新波形（水平線條）
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#4CAF50';
+        ctx.beginPath();
+        var sliceH = w / this.bufferLength; // 按寬度分配樣本
+        var xPos = 0;
+        var baselineY = h - Math.floor(bandHeight / 2) - 0.5; // 波形基準線位置
+        var amplitudeScale = (bandHeight / 2) || 0.5; // 在 1px 高度時會非常小，純粹顏色線條視覺；可擴充 bandHeight 調整細節
+        for (var k = 0; k < this.bufferLength; k++) {
+            var norm = (this.dataArray[k] - 128) / 128.0;
+            norm *= this.amplification;
+            if (norm > 1) norm = 1; else if (norm < -1) norm = -1;
+            var dx = xPos;
+            var dy = baselineY - norm * amplitudeScale; // 垂直位移
+            if (k === 0) ctx.moveTo(dx, dy); else ctx.lineTo(dx, dy);
+            xPos += sliceH;
         }
+        ctx.stroke();
 
-        x += sliceWidth;
+        // 在最左側加一條淡淡的分隔線，幫助視覺定位（可選）
+        ctx.strokeStyle = 'rgba(0,0,0,0.05)';
+        ctx.beginPath();
+        ctx.moveTo(0, h - bandHeight);
+        ctx.lineTo(0, h);
+        ctx.stroke();
     }
-
-    this.canvasContext.stroke();
 };
 
 /*=================================================================
@@ -452,7 +594,7 @@ AccumulatedWaveform.prototype.draw = function() {
     var width = this.width;
     var height = this.height;
     var totalSamples = this.sampleCount;
-    var centerY = height / 2;
+    var centerY = height / 2; // 水平模式使用
     var visibleSamples = this.getVisibleSamples();
 
     if (this.viewStart + visibleSamples > totalSamples) {
@@ -461,200 +603,169 @@ AccumulatedWaveform.prototype.draw = function() {
 
     var startSample = this.viewStart;
     var endSample = Math.min(totalSamples, startSample + visibleSamples);
-    var samplesPerPixel = visibleSamples / width;
+    // 根據模式決定樣本對應的畫布軸：
+    var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
+    var primarySpan = isVertical ? height : width; // 主時間軸長度（垂直用高度、水平用寬度）
+    var samplesPerPixel = visibleSamples / primarySpan;
 
     ctx.strokeStyle = '#1E88E5';
     ctx.lineWidth = 1;
     ctx.beginPath();
 
-    if (samplesPerPixel <= 1) {
-        var spacing = visibleSamples > 1 ? width / (visibleSamples - 1) : width;
-        for (var i = 0; i < visibleSamples; i++) {
-            var sampleIndex = startSample + i;
-            if (sampleIndex >= endSample) {
-                break;
+    if (!isVertical) {
+        // 原水平模式
+        if (samplesPerPixel <= 1) {
+            var spacing = visibleSamples > 1 ? width / (visibleSamples - 1) : width;
+            for (var i = 0; i < visibleSamples; i++) {
+                var sampleIndex = startSample + i;
+                if (sampleIndex >= endSample) break;
+                var pair = this._getSamplePair(sampleIndex);
+                if (!pair) continue;
+                var columnOffset = (pair.max + pair.min) / 2;
+                var adjustedMax = pair.max - columnOffset;
+                var adjustedMin = pair.min - columnOffset;
+                if (adjustedMax > 1) adjustedMax = 1; else if (adjustedMax < -1) adjustedMax = -1;
+                if (adjustedMin > 1) adjustedMin = 1; else if (adjustedMin < -1) adjustedMin = -1;
+                var drawX = visibleSamples > 1 ? i * spacing : width / 2;
+                var yTop = centerY - adjustedMax * centerY;
+                var yBottom = centerY - adjustedMin * centerY;
+                ctx.moveTo(drawX + 0.5, yTop);
+                ctx.lineTo(drawX + 0.5, yBottom);
             }
-
-            var pair = this._getSamplePair(sampleIndex);
-            if (!pair) {
-                continue;
+        } else {
+            for (var x = 0; x < width; x++) {
+                var rangeStart = startSample + x * samplesPerPixel;
+                var rangeEnd = rangeStart + samplesPerPixel;
+                var startIdx = Math.max(Math.floor(rangeStart), startSample);
+                var endIdx = Math.min(Math.floor(rangeEnd), endSample - 1);
+                if (endIdx < startIdx) endIdx = startIdx;
+                var min = 1.0, max = -1.0;
+                for (var idx = startIdx; idx <= endIdx; idx++) {
+                    var samplePair = this._getSamplePair(idx);
+                    if (!samplePair) continue;
+                    if (samplePair.min < min) min = samplePair.min;
+                    if (samplePair.max > max) max = samplePair.max;
+                }
+                if (min > max) continue;
+                var columnOffsetLarge = (max + min) / 2;
+                var adjustedMaxLarge = max - columnOffsetLarge;
+                var adjustedMinLarge = min - columnOffsetLarge;
+                if (adjustedMaxLarge > 1) adjustedMaxLarge = 1; else if (adjustedMaxLarge < -1) adjustedMaxLarge = -1;
+                if (adjustedMinLarge > 1) adjustedMinLarge = 1; else if (adjustedMinLarge < -1) adjustedMinLarge = -1;
+                var yTop2 = centerY - adjustedMaxLarge * centerY;
+                var yBottom2 = centerY - adjustedMinLarge * centerY;
+                ctx.moveTo(x + 0.5, yTop2);
+                ctx.lineTo(x + 0.5, yBottom2);
             }
-
-            var columnOffset = (pair.max + pair.min) / 2;
-            var adjustedMax = pair.max - columnOffset;
-            var adjustedMin = pair.min - columnOffset;
-
-            if (adjustedMax > 1) adjustedMax = 1;
-            if (adjustedMax < -1) adjustedMax = -1;
-            if (adjustedMin > 1) adjustedMin = 1;
-            if (adjustedMin < -1) adjustedMin = -1;
-
-            var drawX = visibleSamples > 1 ? i * spacing : width / 2;
-            var yTop = centerY - adjustedMax * centerY;
-            var yBottom = centerY - adjustedMin * centerY;
-
-            ctx.moveTo(drawX + 0.5, yTop);
-            ctx.lineTo(drawX + 0.5, yBottom);
         }
     } else {
-        for (var x = 0; x < width; x++) {
-            var rangeStart = startSample + x * samplesPerPixel;
-            var rangeEnd = rangeStart + samplesPerPixel;
-            var startIdx = Math.max(Math.floor(rangeStart), startSample);
-            var endIdx = Math.min(Math.floor(rangeEnd), endSample - 1);
-
-            if (endIdx < startIdx) {
-                endIdx = startIdx;
+        // 垂直模式：時間沿 Y 軸向下（viewStart 在頂部->底部），振幅左右擺動。
+        var centerX = width / 2;
+        if (samplesPerPixel <= 1) {
+            var spacingY = visibleSamples > 1 ? height / (visibleSamples - 1) : height;
+            for (var v = 0; v < visibleSamples; v++) {
+                var sIndex = startSample + v;
+                if (sIndex >= endSample) break;
+                var spair = this._getSamplePair(sIndex);
+                if (!spair) continue;
+                var offset = (spair.max + spair.min) / 2;
+                var aMax = spair.max - offset;
+                var aMin = spair.min - offset;
+                if (aMax > 1) aMax = 1; else if (aMax < -1) aMax = -1;
+                if (aMin > 1) aMin = 1; else if (aMin < -1) aMin = -1;
+                var drawY = visibleSamples > 1 ? v * spacingY : height / 2;
+                var xLeft = centerX + aMin * centerX;
+                var xRight = centerX + aMax * centerX;
+                ctx.moveTo(xLeft, drawY + 0.5);
+                ctx.lineTo(xRight, drawY + 0.5);
             }
-
-            var min = 1.0;
-            var max = -1.0;
-
-            for (var idx = startIdx; idx <= endIdx; idx++) {
-                var samplePair = this._getSamplePair(idx);
-                if (!samplePair) {
-                    continue;
+        } else {
+            for (var y = 0; y < height; y++) {
+                var rStart = startSample + y * samplesPerPixel;
+                var rEnd = rStart + samplesPerPixel;
+                var sIdx = Math.max(Math.floor(rStart), startSample);
+                var eIdx = Math.min(Math.floor(rEnd), endSample - 1);
+                if (eIdx < sIdx) eIdx = sIdx;
+                var vmin = 1.0, vmax = -1.0;
+                for (var si = sIdx; si <= eIdx; si++) {
+                    var pr = this._getSamplePair(si);
+                    if (!pr) continue;
+                    if (pr.min < vmin) vmin = pr.min;
+                    if (pr.max > vmax) vmax = pr.max;
                 }
-                if (samplePair.min < min) {
-                    min = samplePair.min;
-                }
-                if (samplePair.max > max) {
-                    max = samplePair.max;
-                }
+                if (vmin > vmax) continue;
+                var off = (vmax + vmin) / 2;
+                var adjMax = vmax - off;
+                var adjMin = vmin - off;
+                if (adjMax > 1) adjMax = 1; else if (adjMax < -1) adjMax = -1;
+                if (adjMin > 1) adjMin = 1; else if (adjMin < -1) adjMin = -1;
+                var xLeft2 = centerX + adjMin * centerX;
+                var xRight2 = centerX + adjMax * centerX;
+                ctx.moveTo(xLeft2, y + 0.5);
+                ctx.lineTo(xRight2, y + 0.5);
             }
-
-            if (min > max) {
-                continue;
-            }
-
-            var columnOffsetLarge = (max + min) / 2;
-            var adjustedMaxLarge = max - columnOffsetLarge;
-            var adjustedMinLarge = min - columnOffsetLarge;
-
-            if (adjustedMaxLarge > 1) adjustedMaxLarge = 1;
-            if (adjustedMaxLarge < -1) adjustedMaxLarge = -1;
-            if (adjustedMinLarge > 1) adjustedMinLarge = 1;
-            if (adjustedMinLarge < -1) adjustedMinLarge = -1;
-
-            var yTop = centerY - adjustedMaxLarge * centerY;
-            var yBottom = centerY - adjustedMinLarge * centerY;
-
-            ctx.moveTo(x + 0.5, yTop);
-            ctx.lineTo(x + 0.5, yBottom);
         }
     }
 
     ctx.stroke();
     
-    // 繪製選取區域
+    // 繪製選取區域（根據模式不同改變方向）
     if (selectionStart !== null && selectionEnd !== null) {
         var selStart = Math.min(selectionStart, selectionEnd);
         var selEnd = Math.max(selectionStart, selectionEnd);
-        
-        // 只繪製在可視範圍內的選取
         if (selEnd >= startSample && selStart <= endSample) {
             var visStart = Math.max(selStart, startSample);
             var visEnd = Math.min(selEnd, endSample);
-            
-            var selStartX = ((visStart - startSample) / visibleSamples) * width;
-            var selEndX = ((visEnd - startSample) / visibleSamples) * width;
-            
-            // 繪製半透明選取區域
-            ctx.fillStyle = 'rgba(76, 175, 80, 0.2)';
-            ctx.fillRect(selStartX, 0, selEndX - selStartX, height);
-            
-            // 繪製選取邊界線
-            ctx.strokeStyle = '#4CAF50';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(selStartX, 0);
-            ctx.lineTo(selStartX, height);
-            ctx.moveTo(selEndX, 0);
-            ctx.lineTo(selEndX, height);
-            ctx.stroke();
-            
-            // 繪製可拖曳的圓形手柄（觸控友善）
-            var handleRadius = 12;
-            var handleY = height / 2;
-            
-            // 左側手柄
-            if (selStart >= startSample) {
-                ctx.fillStyle = '#4CAF50';
-                ctx.strokeStyle = '#FFFFFF';
+            if (!isVertical) {
+                var selStartX = ((visStart - startSample) / visibleSamples) * width;
+                var selEndX = ((visEnd - startSample) / visibleSamples) * width;
+                ctx.fillStyle = 'rgba(76, 175, 80, 0.2)';
+                ctx.fillRect(selStartX, 0, selEndX - selStartX, height);
+                ctx.strokeStyle = '#4CAF50';
                 ctx.lineWidth = 2;
                 ctx.beginPath();
-                ctx.arc(selStartX, handleY, handleRadius, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.moveTo(selStartX, 0); ctx.lineTo(selStartX, height);
+                ctx.moveTo(selEndX, 0); ctx.lineTo(selEndX, height);
                 ctx.stroke();
-                
-                // 左側手柄內部指示器
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(selStartX - 4, handleY - 5);
-                ctx.lineTo(selStartX - 4, handleY + 5);
-                ctx.moveTo(selStartX, handleY - 5);
-                ctx.lineTo(selStartX, handleY + 5);
-                ctx.moveTo(selStartX + 4, handleY - 5);
-                ctx.lineTo(selStartX + 4, handleY + 5);
+                var handleRadius = 12; var handleY = height / 2;
+                if (selStart >= startSample) {
+                    ctx.fillStyle = '#4CAF50'; ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(selStartX, handleY, handleRadius, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+                }
+                if (selEnd <= endSample) {
+                    ctx.fillStyle = '#4CAF50'; ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(selEndX, handleY, handleRadius, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+                }
+            } else {
+                // 垂直模式：選取顯示為水平帶
+                var selStartY = ((visStart - startSample) / visibleSamples) * height;
+                var selEndY = ((visEnd - startSample) / visibleSamples) * height;
+                ctx.fillStyle = 'rgba(76,175,80,0.2)';
+                ctx.fillRect(0, selStartY, width, selEndY - selStartY);
+                ctx.strokeStyle = '#4CAF50'; ctx.lineWidth = 2; ctx.beginPath();
+                ctx.moveTo(0, selStartY); ctx.lineTo(width, selStartY);
+                ctx.moveTo(0, selEndY); ctx.lineTo(width, selEndY);
                 ctx.stroke();
-            }
-            
-            // 右側手柄
-            if (selEnd <= endSample) {
-                ctx.fillStyle = '#4CAF50';
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.arc(selEndX, handleY, handleRadius, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.stroke();
-                
-                // 右側手柄內部指示器
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(selEndX - 4, handleY - 5);
-                ctx.lineTo(selEndX - 4, handleY + 5);
-                ctx.moveTo(selEndX, handleY - 5);
-                ctx.lineTo(selEndX, handleY + 5);
-                ctx.moveTo(selEndX + 4, handleY - 5);
-                ctx.lineTo(selEndX + 4, handleY + 5);
-                ctx.stroke();
+                var handleRadiusV = 12; var handleX = width / 2;
+                if (selStart >= startSample) { ctx.fillStyle='#4CAF50'; ctx.strokeStyle='#FFFFFF'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(handleX, selStartY, handleRadiusV, 0, Math.PI*2); ctx.fill(); ctx.stroke(); }
+                if (selEnd <= endSample) { ctx.fillStyle='#4CAF50'; ctx.strokeStyle='#FFFFFF'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(handleX, selEndY, handleRadiusV, 0, Math.PI*2); ctx.fill(); ctx.stroke(); }
             }
         }
     }
     
-    // 繪製播放位置指示器（紅色垂直線）
+    // 繪製播放位置指示器（模式差異：水平模式垂直線；垂直模式水平線）
     if (this.playbackPosition >= 0 && this.playbackPosition <= totalSamples) {
-        // 檢查播放位置是否在可視範圍內
         if (this.playbackPosition >= startSample && this.playbackPosition <= endSample) {
-            var playbackX = ((this.playbackPosition - startSample) / visibleSamples) * width;
-            
-            // 繪製紅色垂直線
-            ctx.strokeStyle = '#FF0000';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(playbackX, 0);
-            ctx.lineTo(playbackX, height);
-            ctx.stroke();
-            
-            // 繪製頂部三角形指示器
-            ctx.fillStyle = '#FF0000';
-            ctx.beginPath();
-            ctx.moveTo(playbackX, 0);
-            ctx.lineTo(playbackX - 6, 10);
-            ctx.lineTo(playbackX + 6, 10);
-            ctx.closePath();
-            ctx.fill();
-            
-            // 繪製底部三角形指示器
-            ctx.beginPath();
-            ctx.moveTo(playbackX, height);
-            ctx.lineTo(playbackX - 6, height - 10);
-            ctx.lineTo(playbackX + 6, height - 10);
-            ctx.closePath();
-            ctx.fill();
+            if (!isVertical) {
+                var playbackX = ((this.playbackPosition - startSample) / visibleSamples) * width;
+                ctx.strokeStyle = '#FF0000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(playbackX, 0); ctx.lineTo(playbackX, height); ctx.stroke();
+                ctx.fillStyle='#FF0000'; ctx.beginPath(); ctx.moveTo(playbackX,0); ctx.lineTo(playbackX-6,10); ctx.lineTo(playbackX+6,10); ctx.closePath(); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(playbackX,height); ctx.lineTo(playbackX-6,height-10); ctx.lineTo(playbackX+6,height-10); ctx.closePath(); ctx.fill();
+            } else {
+                var playbackY = ((this.playbackPosition - startSample) / visibleSamples) * height;
+                ctx.strokeStyle='#FF0000'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0, playbackY); ctx.lineTo(width, playbackY); ctx.stroke();
+                // 左右三角形指示器
+                ctx.fillStyle='#FF0000'; ctx.beginPath(); ctx.moveTo(0, playbackY); ctx.lineTo(10, playbackY-6); ctx.lineTo(10, playbackY+6); ctx.closePath(); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(width, playbackY); ctx.lineTo(width-10, playbackY-6); ctx.lineTo(width-10, playbackY+6); ctx.closePath(); ctx.fill();
+            }
         }
     }
     
@@ -697,11 +808,14 @@ AccumulatedWaveform.prototype._getMinVisibleSamples = function(total) {
         return 0;
     }
 
+    var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
+    var primaryPixels = isVertical ? this.height : this.width;
+
     var minSpan;
-    if (total <= this.width) {
+    if (total <= primaryPixels) {
         minSpan = Math.max(1, Math.ceil(total / 6));
     } else {
-        minSpan = Math.max(1, Math.floor(this.width / 2));
+        minSpan = Math.max(1, Math.floor(primaryPixels / 2));
     }
 
     if (minSpan > total) {
@@ -853,7 +967,9 @@ AccumulatedWaveform.prototype.panByPixels = function(pixelDelta) {
         return;
     }
 
-    var samplesPerPixel = this.getVisibleSamples() / this.width;
+    var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
+    var primaryPixels = isVertical ? this.height : this.width;
+    var samplesPerPixel = this.getVisibleSamples() / primaryPixels;
     this._panRemainder += pixelDelta * samplesPerPixel;
     var sampleDelta = Math.trunc(this._panRemainder);
 
@@ -1017,101 +1133,90 @@ OverviewWaveform.prototype.draw = function() {
     var ctx = this.canvasContext;
     var width = this.width;
     var height = this.height;
-    var centerY = height / 2;
-    
-    // 繪製整體波形（簡化版本）
-    var samplesPerPixel = sampleCount / width;
-    
-    ctx.strokeStyle = '#9E9E9E';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    
-    for (var x = 0; x < width; x++) {
-        var rangeStart = x * samplesPerPixel;
-        var rangeEnd = rangeStart + samplesPerPixel;
-        var startIdx = Math.floor(rangeStart);
-        var endIdx = Math.min(Math.floor(rangeEnd), sampleCount - 1);
-        
-        if (endIdx < startIdx) {
-            endIdx = startIdx;
-        }
-        
-        var min = 1.0;
-        var max = -1.0;
-        
-        for (var idx = startIdx; idx <= endIdx; idx++) {
-            if (idx >= 0 && idx < this.accumulatedWaveform.sampleMin.length) {
-                var sampleMin = this.accumulatedWaveform.sampleMin[idx];
-                var sampleMax = this.accumulatedWaveform.sampleMax[idx];
-                if (sampleMin < min) min = sampleMin;
-                if (sampleMax > max) max = sampleMax;
+    var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
+    var centerAxis = isVertical ? width / 2 : height / 2;
+    var primarySpan = isVertical ? height : width; // 時間軸投影長度
+    var samplesPerPixel = sampleCount / primarySpan;
+    ctx.strokeStyle = '#9E9E9E'; ctx.lineWidth = 1; ctx.beginPath();
+    if (!isVertical) {
+        // 原水平總覽
+        for (var x = 0; x < width; x++) {
+            var rangeStart = x * samplesPerPixel;
+            var rangeEnd = rangeStart + samplesPerPixel;
+            var startIdx = Math.floor(rangeStart);
+            var endIdx = Math.min(Math.floor(rangeEnd), sampleCount - 1);
+            if (endIdx < startIdx) endIdx = startIdx;
+            var min = 1.0, max = -1.0;
+            for (var idx = startIdx; idx <= endIdx; idx++) {
+                if (idx >= 0 && idx < this.accumulatedWaveform.sampleMin.length) {
+                    var sMin = this.accumulatedWaveform.sampleMin[idx];
+                    var sMax = this.accumulatedWaveform.sampleMax[idx];
+                    if (sMin < min) min = sMin; if (sMax > max) max = sMax;
+                }
             }
+            if (min > max) continue;
+            var offset = (max + min)/2; var aMax = max - offset; var aMin = min - offset;
+            if (aMax > 1) aMax=1; else if (aMax < -1) aMax=-1; if (aMin > 1) aMin=1; else if (aMin < -1) aMin=-1;
+            var yTop = (height/2) - aMax * (height/2) * 0.9;
+            var yBottom = (height/2) - aMin * (height/2) * 0.9;
+            ctx.moveTo(x+0.5,yTop); ctx.lineTo(x+0.5,yBottom);
         }
-        
-        if (min > max) {
-            continue;
+    } else {
+        // 垂直總覽：時間沿 Y 軸，振幅左右擺動
+        for (var y = 0; y < height; y++) {
+            var rStart = y * samplesPerPixel;
+            var rEnd = rStart + samplesPerPixel;
+            var sIdx = Math.floor(rStart);
+            var eIdx = Math.min(Math.floor(rEnd), sampleCount - 1);
+            if (eIdx < sIdx) eIdx = sIdx;
+            var vmin = 1.0, vmax = -1.0;
+            for (var ii = sIdx; ii <= eIdx; ii++) {
+                if (ii >= 0 && ii < this.accumulatedWaveform.sampleMin.length) {
+                    var mn = this.accumulatedWaveform.sampleMin[ii];
+                    var mx = this.accumulatedWaveform.sampleMax[ii];
+                    if (mn < vmin) vmin = mn; if (mx > vmax) vmax = mx;
+                }
+            }
+            if (vmin > vmax) continue;
+            var off = (vmax + vmin)/2; var adjMax = vmax - off; var adjMin = vmin - off;
+            if (adjMax > 1) adjMax=1; else if (adjMax<-1) adjMax=-1; if (adjMin>1) adjMin=1; else if (adjMin<-1) adjMin=-1;
+            var xLeft = (width/2) + adjMin * (width/2) * 0.9;
+            var xRight = (width/2) + adjMax * (width/2) * 0.9;
+            ctx.moveTo(xLeft, y+0.5); ctx.lineTo(xRight, y+0.5);
         }
-        
-        // 去除 DC offset
-        var columnOffset = (max + min) / 2;
-        var adjustedMax = max - columnOffset;
-        var adjustedMin = min - columnOffset;
-        
-        if (adjustedMax > 1) adjustedMax = 1;
-        if (adjustedMax < -1) adjustedMax = -1;
-        if (adjustedMin > 1) adjustedMin = 1;
-        if (adjustedMin < -1) adjustedMin = -1;
-        
-        var yTop = centerY - adjustedMax * centerY * 0.9;
-        var yBottom = centerY - adjustedMin * centerY * 0.9;
-        
-        ctx.moveTo(x + 0.5, yTop);
-        ctx.lineTo(x + 0.5, yBottom);
     }
-    
     ctx.stroke();
     
     // 繪製當前視窗指示器
     var viewStart = this.accumulatedWaveform.viewStart;
     var visibleSamples = this.accumulatedWaveform.getVisibleSamples();
     
-    var viewStartX = (viewStart / sampleCount) * width;
-    var viewWidth = (visibleSamples / sampleCount) * width;
-    
-    // 繪製半透明的視窗範圍
-    ctx.fillStyle = 'rgba(30, 136, 229, 0.2)';
-    ctx.fillRect(viewStartX, 0, viewWidth, height);
-    
-    // 繪製視窗邊框
-    ctx.strokeStyle = '#1E88E5';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(viewStartX, 0, viewWidth, height);
+    if (!isVertical) {
+        var viewStartX = (viewStart / sampleCount) * width;
+        var viewWidth = (visibleSamples / sampleCount) * width;
+        ctx.fillStyle = 'rgba(30,136,229,0.2)'; ctx.fillRect(viewStartX,0,viewWidth,height);
+        ctx.strokeStyle='#1E88E5'; ctx.lineWidth=2; ctx.strokeRect(viewStartX,0,viewWidth,height);
+    } else {
+        var viewStartY = (viewStart / sampleCount) * height;
+        var viewHeight = (visibleSamples / sampleCount) * height;
+        ctx.fillStyle = 'rgba(30,136,229,0.2)'; ctx.fillRect(0, viewStartY, width, viewHeight);
+        ctx.strokeStyle='#1E88E5'; ctx.lineWidth=2; ctx.strokeRect(0, viewStartY, width, viewHeight);
+    }
 
     // 繪製紅色垂直播放位置（若有播放或已設定位置）
     var playbackPos = this.accumulatedWaveform.playbackPosition;
     if (typeof playbackPos === 'number' && playbackPos >= 0 && playbackPos <= sampleCount) {
-        var playbackX = (playbackPos / sampleCount) * width;
-        ctx.strokeStyle = '#FF0000';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(playbackX + 0.5, 0);
-        ctx.lineTo(playbackX + 0.5, height);
-        ctx.stroke();
-        // 頂部三角形
-        ctx.fillStyle = '#FF0000';
-        ctx.beginPath();
-        ctx.moveTo(playbackX, 0);
-        ctx.lineTo(playbackX - 5, 9);
-        ctx.lineTo(playbackX + 5, 9);
-        ctx.closePath();
-        ctx.fill();
-        // 底部三角形
-        ctx.beginPath();
-        ctx.moveTo(playbackX, height);
-        ctx.lineTo(playbackX - 5, height - 9);
-        ctx.lineTo(playbackX + 5, height - 9);
-        ctx.closePath();
-        ctx.fill();
+        if (!isVertical) {
+            var playbackX = (playbackPos / sampleCount) * width;
+            ctx.strokeStyle='#FF0000'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(playbackX+0.5,0); ctx.lineTo(playbackX+0.5,height); ctx.stroke();
+            ctx.fillStyle='#FF0000'; ctx.beginPath(); ctx.moveTo(playbackX,0); ctx.lineTo(playbackX-5,9); ctx.lineTo(playbackX+5,9); ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(playbackX,height); ctx.lineTo(playbackX-5,height-9); ctx.lineTo(playbackX+5,height-9); ctx.closePath(); ctx.fill();
+        } else {
+            var playbackY = (playbackPos / sampleCount) * height;
+            ctx.strokeStyle='#FF0000'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,playbackY+0.5); ctx.lineTo(width,playbackY+0.5); ctx.stroke();
+            ctx.fillStyle='#FF0000'; ctx.beginPath(); ctx.moveTo(0,playbackY); ctx.lineTo(9,playbackY-5); ctx.lineTo(9,playbackY+5); ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(width,playbackY); ctx.lineTo(width-9,playbackY-5); ctx.lineTo(width-9,playbackY+5); ctx.closePath(); ctx.fill();
+        }
     }
 };
 
@@ -1338,6 +1443,7 @@ function bindAccumulatedWaveformInteractions(canvas) {
     var isResizingSelection = false;
     var resizeEdge = null; // 'left' 或 'right'
     var lastX = 0;
+    var lastY = 0;
     var selectionStartX = 0;
     var activePointerId = null;
     var longPressTimer = null;
@@ -1354,10 +1460,11 @@ function bindAccumulatedWaveformInteractions(canvas) {
     var edgeThreshold = isTouchDevice ? 25 : 10; // 觸控設備用更大的範圍
 
     // 檢測滑鼠是否在選取區域邊緣
-    function getSelectionEdgeAt(x, rect) {
+    function getSelectionEdgeAt(x, rect, y) {
         if (selectionStart === null || selectionEnd === null) {
             return null;
         }
+        var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
         
         var visibleSamples = accumulatedWaveform.getVisibleSamples();
         var selStart = Math.min(selectionStart, selectionEnd);
@@ -1366,18 +1473,16 @@ function bindAccumulatedWaveformInteractions(canvas) {
         // 轉換樣本位置到像素位置
         var leftSamplePos = selStart - accumulatedWaveform.viewStart;
         var rightSamplePos = selEnd - accumulatedWaveform.viewStart;
-        
-        var leftX = (leftSamplePos / visibleSamples) * rect.width;
-        var rightX = (rightSamplePos / visibleSamples) * rect.width;
-        
-        // 檢查是否接近左邊緣
-        if (Math.abs(x - leftX) <= edgeThreshold) {
-            return 'left';
-        }
-        
-        // 檢查是否接近右邊緣
-        if (Math.abs(x - rightX) <= edgeThreshold) {
-            return 'right';
+        if (!isVertical) {
+            var leftX = (leftSamplePos / visibleSamples) * rect.width;
+            var rightX = (rightSamplePos / visibleSamples) * rect.width;
+            if (Math.abs(x - leftX) <= edgeThreshold) return 'left';
+            if (Math.abs(x - rightX) <= edgeThreshold) return 'right';
+        } else {
+            var topY = (leftSamplePos / visibleSamples) * rect.height;
+            var bottomY = (rightSamplePos / visibleSamples) * rect.height;
+            if (Math.abs(y - topY) <= edgeThreshold) return 'top';
+            if (Math.abs(y - bottomY) <= edgeThreshold) return 'bottom';
         }
         
         return null;
@@ -1400,10 +1505,12 @@ function bindAccumulatedWaveformInteractions(canvas) {
         
         var rect = canvas.getBoundingClientRect();
         var x = event.clientX - rect.left;
-        var edge = getSelectionEdgeAt(x, rect);
+        var y = event.clientY - rect.top;
+        var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
+        var edge = getSelectionEdgeAt(x, rect, y);
         
         if (event.shiftKey && edge) {
-            canvas.style.cursor = 'ew-resize';
+            canvas.style.cursor = isVertical ? 'ns-resize' : 'ew-resize';
         } else if (event.shiftKey) {
             canvas.style.cursor = 'crosshair';
         } else {
@@ -1418,8 +1525,9 @@ function bindAccumulatedWaveformInteractions(canvas) {
         
         activePointerId = event.pointerId;
         var rect = canvas.getBoundingClientRect();
-        var clickX = event.clientX - rect.left;
-        var clickY = event.clientY - rect.top;
+    var clickX = event.clientX - rect.left;
+    var clickY = event.clientY - rect.top;
+    var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
         
         // 記錄起始位置
         startX = event.clientX;
@@ -1430,7 +1538,7 @@ function bindAccumulatedWaveformInteractions(canvas) {
             clearLongPressTimer();
             
             // 檢查是否在選取區域邊緣
-            var edge = getSelectionEdgeAt(clickX, rect);
+            var edge = getSelectionEdgeAt(clickX, rect, clickY);
             
             if (edge) {
                 // 拉伸選取區域邊緣
@@ -1438,17 +1546,17 @@ function bindAccumulatedWaveformInteractions(canvas) {
                 resizeEdge = edge;
                 isDragging = false;
                 isSelecting = false;
-                canvas.style.cursor = 'ew-resize';
+                canvas.style.cursor = isVertical ? 'ns-resize' : 'ew-resize';
             } else {
                 // 創建新的選取區域
                 isSelecting = true;
                 isDragging = false;
                 isResizingSelection = false;
-                selectionStartX = clickX;
+                selectionStartX = isVertical ? clickY : clickX;
                 
                 // 計算選取起始樣本
                 var visibleSamples = accumulatedWaveform.getVisibleSamples();
-                var sampleRatio = clickX / rect.width;
+                var sampleRatio = isVertical ? (clickY / rect.height) : (clickX / rect.width);
                 selectionStart = Math.floor(accumulatedWaveform.viewStart + sampleRatio * visibleSamples);
                 selectionEnd = selectionStart;
                 
@@ -1465,7 +1573,7 @@ function bindAccumulatedWaveformInteractions(canvas) {
             // 左鍵單擊（非 Ctrl/Cmd）：移動播放位置或其他操作
             
             // 檢查是否直接點擊在選取區域邊緣（觸控設備優化）
-            var edge = getSelectionEdgeAt(clickX, rect);
+            var edge = getSelectionEdgeAt(clickX, rect, clickY);
             
             if (edge) {
                 // 直接開始拉伸（無需 Shift，方便觸控操作）
@@ -1474,7 +1582,7 @@ function bindAccumulatedWaveformInteractions(canvas) {
                 resizeEdge = edge;
                 isDragging = false;
                 isSelecting = false;
-                canvas.style.cursor = 'ew-resize';
+                canvas.style.cursor = isVertical ? 'ns-resize' : 'ew-resize';
                 
                 // 觸控回饋
                 if (navigator.vibrate) {
@@ -1483,7 +1591,7 @@ function bindAccumulatedWaveformInteractions(canvas) {
             } else {
                 // 先設置播放位置（點擊時立即設置）
                 var visibleSamples = accumulatedWaveform.getVisibleSamples();
-                var sampleRatio = clickX / rect.width;
+                var sampleRatio = isVertical ? (clickY / rect.height) : (clickX / rect.width);
                 var clickedSample = Math.floor(accumulatedWaveform.viewStart + sampleRatio * visibleSamples);
                 
                 // 限制在有效範圍內
@@ -1498,7 +1606,7 @@ function bindAccumulatedWaveformInteractions(canvas) {
                         isLongPress = true;
                         isSelecting = true;
                         isDragging = false;
-                        selectionStartX = clickX;
+                        selectionStartX = isVertical ? clickY : clickX;
                         
                         // 計算選取起始樣本
                         selectionStart = clickedSample;
@@ -1527,7 +1635,7 @@ function bindAccumulatedWaveformInteractions(canvas) {
                 isDragging = true;
                 isSelecting = false;
                 isResizingSelection = false;
-                lastX = event.clientX;
+                lastX = event.clientX; lastY = event.clientY;
                 accumulatedWaveform.isAutoScroll = false;
                 canvas.style.cursor = 'grabbing';
             }
@@ -1537,7 +1645,7 @@ function bindAccumulatedWaveformInteractions(canvas) {
             isDragging = true;
             isSelecting = false;
             isResizingSelection = false;
-            lastX = event.clientX;
+            lastX = event.clientX; lastY = event.clientY;
             accumulatedWaveform.isAutoScroll = false;
             canvas.style.cursor = 'grabbing';
         }
@@ -1558,8 +1666,10 @@ function bindAccumulatedWaveformInteractions(canvas) {
             return;
         }
         
-        var rect = canvas.getBoundingClientRect();
-        var currentX = event.clientX - rect.left;
+    var rect = canvas.getBoundingClientRect();
+    var currentX = event.clientX - rect.left;
+    var currentY = event.clientY - rect.top;
+    var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
         
         // 檢測移動距離，超過閾值則取消長按
         if (longPressTimer && !isLongPress) {
@@ -1576,7 +1686,7 @@ function bindAccumulatedWaveformInteractions(canvas) {
         if (isResizingSelection) {
             // 拉伸選取區域邊緣
             var visibleSamples = accumulatedWaveform.getVisibleSamples();
-            var sampleRatio = currentX / rect.width;
+            var sampleRatio = isVertical ? (currentY / rect.height) : (currentX / rect.width);
             var newSample = Math.floor(accumulatedWaveform.viewStart + sampleRatio * visibleSamples);
             
             // 限制在有效範圍內
@@ -1586,9 +1696,9 @@ function bindAccumulatedWaveformInteractions(canvas) {
             }
             
             // 更新對應的邊緣
-            if (resizeEdge === 'left') {
+            if (resizeEdge === 'left' || resizeEdge === 'top') {
                 selectionStart = newSample;
-            } else if (resizeEdge === 'right') {
+            } else if (resizeEdge === 'right' || resizeEdge === 'bottom') {
                 selectionEnd = newSample;
             }
             
@@ -1597,7 +1707,7 @@ function bindAccumulatedWaveformInteractions(canvas) {
         } else if (isSelecting) {
             // 更新選取範圍
             var visibleSamples = accumulatedWaveform.getVisibleSamples();
-            var sampleRatio = currentX / rect.width;
+            var sampleRatio = isVertical ? (currentY / rect.height) : (currentX / rect.width);
             selectionEnd = Math.floor(accumulatedWaveform.viewStart + sampleRatio * visibleSamples);
             
             // 限制在有效範圍內
@@ -1610,10 +1720,10 @@ function bindAccumulatedWaveformInteractions(canvas) {
             
         } else if (isDragging && !isLongPress) {
             // 平移波形（長按模式下不平移）
-            var deltaX = event.clientX - lastX;
-            if (deltaX !== 0) {
-                accumulatedWaveform.panByPixels(-deltaX);
-                lastX = event.clientX;
+            var deltaPrimary = isVertical ? (event.clientY - lastY) : (event.clientX - lastX);
+            if (deltaPrimary !== 0) {
+                accumulatedWaveform.panByPixels(-deltaPrimary);
+                if (isVertical) { lastY = event.clientY; } else { lastX = event.clientX; }
             }
         }
     });
@@ -1661,17 +1771,19 @@ function bindAccumulatedWaveformInteractions(canvas) {
 
         event.preventDefault();
 
+        var rect = canvas.getBoundingClientRect();
+        var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
+
         if (event.ctrlKey || event.metaKey) {
             // Ctrl/Command + 滾輪：以指標位置為錨點縮放
             var step = event.deltaY > 0 ? -1 : 1;
             if (step !== 0) {
-                var rect = canvas.getBoundingClientRect();
-                var anchorRatio = (event.clientX - rect.left) / rect.width;
+                var anchorRatio = isVertical ? ((event.clientY - rect.top) / rect.height) : ((event.clientX - rect.left) / rect.width);
                 accumulatedWaveform.zoomBySteps(step, anchorRatio);
             }
         } else {
             // 一般滾輪：平移視圖（支援水平與垂直）
-            var delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+            var delta = isVertical ? event.deltaY : (Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY);
             if (event.shiftKey && event.deltaY !== 0) {
                 delta = event.deltaY;
             }
@@ -1780,6 +1892,7 @@ function bindOverviewWaveformInteractions(canvas) {
     
     var isDragging = false;
     var dragStartX = 0;
+    var dragStartY = 0;
     var dragStartViewStart = 0;
     var isInViewWindow = false;
     var activePointerId = null;
@@ -1788,76 +1901,86 @@ function bindOverviewWaveformInteractions(canvas) {
     var isResizing = false;
     var resizeEdge = null; // 'left' 或 'right'
     var resizeStartX = 0;
+    var resizeStartY = 0;
     var resizeStartViewStart = 0;
     var resizeStartVisibleSamples = 0;
     var edgeThreshold = 10; // 邊緣檢測閾值（畫素）
     
     // 檢查點擊位置是否在視窗指示器內
-    function isInsideViewWindow(clientX) {
+    function isInsideViewWindow(clientCoordX, clientCoordY) {
         if (!accumulatedWaveform || !accumulatedWaveform.sampleCount) {
             return false;
         }
         
         var rect = canvas.getBoundingClientRect();
-        var clickX = clientX - rect.left;
+        var clickX = clientCoordX - rect.left;
+        var clickY = clientCoordY - rect.top;
+        var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
         var sampleCount = accumulatedWaveform.sampleCount;
         var viewStart = accumulatedWaveform.viewStart;
         var visibleSamples = accumulatedWaveform.getVisibleSamples();
         
-        var viewStartX = (viewStart / sampleCount) * rect.width;
-        var viewWidth = (visibleSamples / sampleCount) * rect.width;
-        
-        return clickX >= viewStartX && clickX <= (viewStartX + viewWidth);
+        if (!isVertical) {
+            var viewStartX = (viewStart / sampleCount) * rect.width;
+            var viewWidth = (visibleSamples / sampleCount) * rect.width;
+            return clickX >= viewStartX && clickX <= (viewStartX + viewWidth);
+        } else {
+            var viewStartY = (viewStart / sampleCount) * rect.height;
+            var viewHeight = (visibleSamples / sampleCount) * rect.height;
+            return clickY >= viewStartY && clickY <= (viewStartY + viewHeight);
+        }
     }
     
     // 檢查是否在視窗邊緣
-    function getResizeEdge(clientX) {
+    function getResizeEdge(clientCoordX, clientCoordY) {
         if (!accumulatedWaveform || !accumulatedWaveform.sampleCount) {
             return null;
         }
         
         var rect = canvas.getBoundingClientRect();
-        var clickX = clientX - rect.left;
+        var clickX = clientCoordX - rect.left;
+        var clickY = clientCoordY - rect.top;
+        var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
         var sampleCount = accumulatedWaveform.sampleCount;
         var viewStart = accumulatedWaveform.viewStart;
         var visibleSamples = accumulatedWaveform.getVisibleSamples();
         
-        var viewStartX = (viewStart / sampleCount) * rect.width;
-        var viewEndX = ((viewStart + visibleSamples) / sampleCount) * rect.width;
-        
-        // 檢查是否在左邊緣
-        if (Math.abs(clickX - viewStartX) <= edgeThreshold) {
-            return 'left';
-        }
-        
-        // 檢查是否在右邊緣
-        if (Math.abs(clickX - viewEndX) <= edgeThreshold) {
-            return 'right';
+        if (!isVertical) {
+            var viewStartX = (viewStart / sampleCount) * rect.width;
+            var viewEndX = ((viewStart + visibleSamples) / sampleCount) * rect.width;
+            if (Math.abs(clickX - viewStartX) <= edgeThreshold) return 'left';
+            if (Math.abs(clickX - viewEndX) <= edgeThreshold) return 'right';
+        } else {
+            var viewStartY = (viewStart / sampleCount) * rect.height;
+            var viewEndY = ((viewStart + visibleSamples) / sampleCount) * rect.height;
+            if (Math.abs(clickY - viewStartY) <= edgeThreshold) return 'top';
+            if (Math.abs(clickY - viewEndY) <= edgeThreshold) return 'bottom';
         }
         
         return null;
     }
     
     // 更新鼠標樣式
-    function updateCursor(clientX) {
+    function updateCursor(clientX, clientY) {
         if (!accumulatedWaveform || !accumulatedWaveform.sampleCount) {
             canvas.style.cursor = 'default';
             return;
         }
+        var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
         
         if (isDragging) {
             if (isResizing) {
-                canvas.style.cursor = 'ew-resize';
+                canvas.style.cursor = isVertical ? 'ns-resize' : 'ew-resize';
             } else {
                 canvas.style.cursor = 'grabbing';
             }
             return;
         }
         
-        var edge = getResizeEdge(clientX);
+        var edge = getResizeEdge(clientX, clientY);
         if (edge) {
-            canvas.style.cursor = 'ew-resize';
-        } else if (isInsideViewWindow(clientX)) {
+            canvas.style.cursor = isVertical ? 'ns-resize' : 'ew-resize';
+        } else if (isInsideViewWindow(clientX, clientY)) {
             canvas.style.cursor = 'grab';
         } else {
             canvas.style.cursor = 'pointer';
@@ -1871,28 +1994,32 @@ function bindOverviewWaveformInteractions(canvas) {
         
         var rect = canvas.getBoundingClientRect();
         var clickX = event.clientX - rect.left;
+        var clickY = event.clientY - rect.top;
+        var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
         
         isDragging = true;
         activePointerId = event.pointerId;
-        dragStartX = clickX;
+    dragStartX = clickX;
+    dragStartY = clickY;
         dragStartViewStart = accumulatedWaveform.viewStart;
         
         // 檢查是否在邊緣進行拉伸
-        var edge = getResizeEdge(event.clientX);
+        var edge = getResizeEdge(event.clientX, event.clientY);
         if (edge) {
             isResizing = true;
             resizeEdge = edge;
             resizeStartX = clickX;
+            resizeStartY = clickY;
             resizeStartViewStart = accumulatedWaveform.viewStart;
             resizeStartVisibleSamples = accumulatedWaveform.getVisibleSamples();
         } else {
             isResizing = false;
             resizeEdge = null;
-            isInViewWindow = isInsideViewWindow(event.clientX);
+            isInViewWindow = isInsideViewWindow(event.clientX, event.clientY);
             
             // 如果點擊在視窗外，立即跳轉到該位置
             if (!isInViewWindow) {
-                var clickRatio = clickX / rect.width;
+                var clickRatio = isVertical ? (clickY / rect.height) : (clickX / rect.width);
                 var targetSample = Math.floor(clickRatio * accumulatedWaveform.sampleCount);
                 var visibleSamples = accumulatedWaveform.getVisibleSamples();
                 accumulatedWaveform.viewStart = Math.floor(targetSample - visibleSamples / 2);
@@ -1902,6 +2029,7 @@ function bindOverviewWaveformInteractions(canvas) {
                 
                 // 更新拖動起始位置
                 dragStartX = clickX;
+                dragStartY = clickY;
                 dragStartViewStart = accumulatedWaveform.viewStart;
                 isInViewWindow = true;
             }
@@ -1913,7 +2041,7 @@ function bindOverviewWaveformInteractions(canvas) {
             // ignore if not supported
         }
         
-        updateCursor(event.clientX);
+        updateCursor(event.clientX, event.clientY);
     });
     
     canvas.addEventListener('pointermove', function(event) {
@@ -1925,7 +2053,7 @@ function bindOverviewWaveformInteractions(canvas) {
         
         // 更新鼠標樣式
         if (!isDragging) {
-            updateCursor(event.clientX);
+            updateCursor(event.clientX, event.clientY);
         }
         
         if (!isDragging || event.pointerId !== activePointerId) {
@@ -1933,14 +2061,16 @@ function bindOverviewWaveformInteractions(canvas) {
         }
         
         var currentX = event.clientX - rect.left;
-        var deltaX = currentX - (isResizing ? resizeStartX : dragStartX);
+        var currentY = event.clientY - rect.top;
+        var isVertical = orientationManager && orientationManager.isVertical && orientationManager.isVertical();
+    var deltaPrimary = isVertical ? (currentY - (isResizing ? resizeStartY : dragStartY)) : (currentX - (isResizing ? resizeStartX : dragStartX));
         var sampleCount = accumulatedWaveform.sampleCount;
         
         if (isResizing) {
             // 處理邊緣拉伸
-            var deltaSamples = Math.floor((deltaX / rect.width) * sampleCount);
+            var deltaSamples = Math.floor(((isVertical ? (currentY - (isResizing ? resizeStartY : dragStartY)) : (currentX - (isResizing ? resizeStartX : dragStartX))) / (isVertical ? rect.height : rect.width)) * sampleCount);
             
-            if (resizeEdge === 'left') {
+            if (resizeEdge === 'left' || resizeEdge === 'top') {
                 // 拉伸左邊緣：調整 viewStart 和 visibleSamples
                 var newViewStart = resizeStartViewStart + deltaSamples;
                 var newVisibleSamples = resizeStartVisibleSamples - deltaSamples;
@@ -1962,7 +2092,7 @@ function bindOverviewWaveformInteractions(canvas) {
                     accumulatedWaveform.viewStart = newViewStart;
                     accumulatedWaveform.zoomFactor = sampleCount / newVisibleSamples;
                 }
-            } else if (resizeEdge === 'right') {
+            } else if (resizeEdge === 'right' || resizeEdge === 'bottom') {
                 // 拉伸右邊緣：只調整 visibleSamples
                 var newVisibleSamples = resizeStartVisibleSamples + deltaSamples;
                 
@@ -1988,7 +2118,7 @@ function bindOverviewWaveformInteractions(canvas) {
             accumulatedWaveform.draw();
         } else {
             // 處理視窗拖動
-            var deltaSamples = Math.floor((deltaX / rect.width) * sampleCount);
+            var deltaSamples = Math.floor(((isVertical ? (currentY - dragStartY) : (currentX - dragStartX)) / (isVertical ? rect.height : rect.width)) * sampleCount);
             
             accumulatedWaveform.viewStart = dragStartViewStart + deltaSamples;
             accumulatedWaveform.isAutoScroll = false;
@@ -2017,7 +2147,7 @@ function bindOverviewWaveformInteractions(canvas) {
         
         // 恢復鼠標樣式
         if (event) {
-            updateCursor(event.clientX);
+            updateCursor(event.clientX, event.clientY);
         } else {
             canvas.style.cursor = 'default';
         }
@@ -2033,7 +2163,7 @@ function bindOverviewWaveformInteractions(canvas) {
     
     canvas.addEventListener('pointerenter', function(event) {
         if (!isDragging) {
-            updateCursor(event.clientX);
+            updateCursor(event.clientX, event.clientY);
         }
     });
 }
@@ -2322,6 +2452,27 @@ if (btnStopPlayback) {
     });
 }
 
+// 回到開始：將播放位置、視圖、播放動畫全部回到開頭
+function jumpToStart() {
+    if (selectionAudioSource) {
+        try { selectionAudioSource.onended = null; selectionAudioSource.stop(); } catch(e) {}
+        selectionAudioSource = null;
+    }
+    if (accumulatedWaveform) {
+        accumulatedWaveform.stopPlayback();
+        accumulatedWaveform.setPlaybackPosition(0);
+        accumulatedWaveform.isAutoScroll = false;
+        accumulatedWaveform.draw();
+    }
+    updatePlaybackButtonsState();
+}
+
+if (btnJumpStart) {
+    btnJumpStart.addEventListener('click', function(){
+        jumpToStart();
+    });
+}
+
 // 新增：清除選取區間
 function clearSelection() {
     // 若正在播放，使用暫停以保留播放位置
@@ -2363,11 +2514,6 @@ function startRecording() {
     toggleButton.classList.add('recording');
     toggleButton.innerHTML = '■ 停止錄音';
 
-    // 清空之前的錄音片段容器
-    let element = audioBlobsContainer;
-    while (element.firstChild) {
-        element.removeChild(element.firstChild);
-    }
 
     if (downloadButton) {
         downloadButton.disabled = true;
@@ -2428,6 +2574,9 @@ function startRecording() {
                 bindOverviewWaveformInteractions(overviewCanvas);
             }
 
+            // 根據目前模式，套用對應尺寸與重繪（確保垂直模式立即生效）
+            applyDisplayMode();
+
             /*-----------------------------------------------------------
              * 初始化 RecordRTC 錄音器
              * 設定錄音參數和即時處理回調
@@ -2452,22 +2601,7 @@ function startRecording() {
                      * 為每個錄音片段創建獨立的顯示區域和波形
                      *--------------------------------------------------*/
                     
-                    // 創建音頻片段的主容器
-                    var audioContainer = document.createElement('div');
-                    audioContainer.style.cssText = 'margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9;';
-                    
-                    // 創建音頻播放控制器
-                    var au = document.createElement('audio');
-                    au.controls = true;                        // 顯示播放控制
-                    au.srcObject = null;                       // 清空媒體流
-                    au.src = URL.createObjectURL(blob);        // 設定音頻來源
-                    
-                    // 組織容器結構
-                    audioContainer.appendChild(au);            // 添加音頻控制器
-                    audioBlobsContainer.appendChild(audioContainer); // 添加到主容器
-                    audioBlobsContainer.appendChild(document.createElement('hr')); // 添加分隔線
-
-                    // 更新累積波形顯示
+                    // 更新累積波形顯示（移除分段 UI，只保留累積處理）
                     appendBlobToAccumulatedWaveform(blob);
                 }
             });
