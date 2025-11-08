@@ -63,6 +63,7 @@ html, body {
 
 #waveform-wrapper.mode-horizontal .waveform-col { display: block; }
 #waveform-wrapper.mode-horizontal .accumulated-col { order: 1; }
+#waveform-wrapper.mode-horizontal #recording-duration { order: 1.5; margin: 8px auto; text-align: center; }
 #waveform-wrapper.mode-horizontal .overview-col { order: 2; }
 #waveform-wrapper.mode-horizontal .live-col { display: none; }
 /* 隱藏 Overview 時的佈局調整 */
