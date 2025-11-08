@@ -2954,10 +2954,11 @@ OverviewWaveform.prototype.draw = function() {
  * @param {number} secs - 總秒數
  * @returns {string} 格式化的時間字串 (HH:MM:SS 或 MM:SS)
  */
-function calculateTimeDuration(secs) {
+function calculateTimeDuration(secs, includeMillis) {
     var hr = Math.floor(secs / 3600);           // 計算小時
     var min = Math.floor((secs - (hr * 3600)) / 60); // 計算分鐘
     var sec = Math.floor(secs - (hr * 3600) - (min * 60)); // 計算秒數
+    var ms = Math.floor((secs - Math.floor(secs)) * 1000); // 計算毫秒
 
     // 格式化分鐘：小於10時前面補0
     if (min < 10) {
@@ -2969,13 +2970,24 @@ function calculateTimeDuration(secs) {
         sec = "0" + sec;
     }
 
+    // 格式化毫秒：補滿3位數
+    var msStr = ms.toString().padStart(3, '0');
+
+    var timeStr;
     // 如果沒有小時，只顯示分:秒
     if(hr <= 0) {
-        return min + ':' + sec;
+        timeStr = min + ':' + sec;
+    } else {
+        // 有小時時顯示時:分:秒
+        timeStr = hr + ':' + min + ':' + sec;
     }
 
-    // 有小時時顯示時:分:秒
-    return hr + ':' + min + ':' + sec;
+    // 如果需要顯示毫秒
+    if (includeMillis) {
+        timeStr += '.' + msStr;
+    }
+
+    return timeStr;
 }
 
 /**
@@ -4161,6 +4173,14 @@ function stopRecordingCallback() {
         updatePlaybackButtonsState();
         // 最終輸出規格（含 size/duration）
         gatherAndRenderSpecs();
+        // 更新錄音時長顯示（最終）
+        if (audioContext && pcmTotalSamples > 0) {
+            var durationSecs = pcmTotalSamples / audioContext.sampleRate;
+            var timeStr = calculateTimeDuration(durationSecs, true);
+            var samplesStr = pcmTotalSamples.toLocaleString();
+            document.querySelector('#recording-duration').innerHTML = 
+                '錄音時長：' + timeStr + ' | 樣本數：' + samplesStr;
+        }
     });
 
     /*---------------------------------------------------------------
@@ -4612,9 +4632,12 @@ function startRecording() {
             (function looper() {
                 // 僅在錄音期間更新，停止後不再排程
                 if (!isCurrentlyRecording) return;
-                document.querySelector('h3').innerHTML = 'Recording Duration: ' +
-                    calculateTimeDuration((new Date().getTime() - dateStarted) / 1000);
-                setTimeout(looper, 1000);
+                var elapsedSecs = (new Date().getTime() - dateStarted) / 1000;
+                var timeStr = calculateTimeDuration(elapsedSecs, true); // 顯示毫秒
+                var samplesStr = pcmTotalSamples.toLocaleString(); // 格式化數字加千分位
+                document.querySelector('#recording-duration').innerHTML = 
+                    '錄音時長：' + timeStr + ' | 樣本數：' + samplesStr;
+                setTimeout(looper, 100); // 每100ms更新一次以顯示毫秒
             })();
 
             // 保留原始麥克風參考（供 specs 顯示 track 設定）
@@ -4749,6 +4772,14 @@ function finalizeWorkletRecording(){
         });
         updatePlaybackButtonsState();
         gatherAndRenderSpecs();
+        // 更新錄音時長顯示（最終）
+        if (audioContext && pcmTotalSamples > 0) {
+            var durationSecs = pcmTotalSamples / audioContext.sampleRate;
+            var timeStr = calculateTimeDuration(durationSecs, true);
+            var samplesStr = pcmTotalSamples.toLocaleString();
+            document.querySelector('#recording-duration').innerHTML = 
+                '錄音時長：' + timeStr + ' | 樣本數：' + samplesStr;
+        }
         showToast('錄音完成 (Worklet)');
         // 停止後 VU Meter 若需繼續顯示播放音訊會由 playback source 重新驅動；此處斷開 preGain 與 analyser 以停止原輸入能量
         try { if (preGainNode) preGainNode.disconnect(analyser); } catch(e){}
