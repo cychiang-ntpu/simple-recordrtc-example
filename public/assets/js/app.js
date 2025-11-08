@@ -58,35 +58,68 @@ function applyDisplayMode(){
     var vuCanvas = document.getElementById('vu-meter');
 
     function doResizePass(){
+        var dpr = window.devicePixelRatio || 1;
+        var targetAccumW, targetAccumH, targetOverviewW, targetOverviewH;
+        
         if(orientationManager.isVertical()){
-            var dpr = window.devicePixelRatio || 1;
             var targetH = Math.round(window.innerHeight * 0.80); // 80vh 高度
-            [overviewCanvas, accumCanvas].forEach(function(c){
-                if(!c) return;
-                // 檢查 canvas 是否已轉移控制權（如果是就跳過 resize）
+            // 計算目標尺寸（先取得 CSS 寬度）
+            if (accumCanvas) {
+                var cssWAccum = accumCanvas.clientWidth || 240;
+                targetAccumW = Math.round(cssWAccum * dpr);
+                targetAccumH = Math.round(targetH * dpr);
+            }
+            if (overviewCanvas) {
+                var cssWOverview = overviewCanvas.clientWidth || 240;
+                targetOverviewW = Math.round(cssWOverview * dpr);
+                targetOverviewH = Math.round(targetH * dpr);
+            }
+            
+            // 嘗試直接調整 canvas（如果沒有轉移控制權）
+            if (accumCanvas) {
                 try {
-                    var cssW = c.clientWidth || 240; // 需在已套用 grid 後再量測
-                    c.width = Math.round(cssW * dpr);
-                    c.height = Math.round(targetH * dpr);
-                    c.style.height = '100%';
+                    accumCanvas.width = targetAccumW;
+                    accumCanvas.height = targetAccumH;
+                    accumCanvas.style.height = '100%';
                 } catch(e) {
-                    // Canvas 已轉移控制權，無法調整大小，靜默跳過
+                    // Canvas 已轉移控制權，稍後通知 Worker
                 }
-            });
+            }
+            if (overviewCanvas) {
+                try {
+                    overviewCanvas.width = targetOverviewW;
+                    overviewCanvas.height = targetOverviewH;
+                    overviewCanvas.style.height = '100%';
+                } catch(e) {
+                    // Canvas 已轉移控制權，稍後通知 Worker
+                }
+            }
+            
             if (liveWaveform && typeof liveWaveform.stop === 'function') {
                 try { liveWaveform.stop(); } catch(e){}
             }
         } else {
             // 水平模式
+            targetAccumW = 750;
+            targetAccumH = 150;
+            targetOverviewW = 750;
+            targetOverviewH = 90;
+            
             try {
-                if(overviewCanvas){ overviewCanvas.width = 750; overviewCanvas.height = 90; }
+                if(overviewCanvas){ 
+                    overviewCanvas.width = targetOverviewW; 
+                    overviewCanvas.height = targetOverviewH; 
+                }
             } catch(e) {
-                // Canvas 已轉移控制權，無法調整大小
+                // Canvas 已轉移控制權，稍後通知 Worker
             }
             try {
-                if(accumCanvas){ accumCanvas.width = 750; accumCanvas.height = 150; }
+                if(accumCanvas){ 
+                    accumCanvas.width = targetAccumW; 
+                    accumCanvas.height = targetAccumH; 
+                }
             } catch(e) {
-                // Canvas 已轉移控制權，無法調整大小
+                // Canvas 已轉移控制權，稍後通知 Worker
             }
             if(liveWaveform && typeof liveWaveform.stop === 'function') {
                 try { liveWaveform.stop(); } catch(e){}
@@ -96,26 +129,43 @@ function applyDisplayMode(){
         // 同步 AccumulatedWaveform / OverviewWaveform 內部尺寸與 Worker 畫布
         try {
             if (accumulatedWaveform) {
+                // 使用實際的 canvas 尺寸（可能是剛設定的，或是既有的）
                 if (accumCanvas) {
-                    accumulatedWaveform.width = accumCanvas.width;
-                    accumulatedWaveform.height = accumCanvas.height;
-                }
-                // 若使用 worker，通知其調整 offscreen 尺寸
-                if (accumulatedWaveform._useWorker && accumulatedWaveform._worker && accumCanvas) {
-                    accumulatedWaveform._worker.postMessage({
-                        type: 'resizeCanvas',
-                        width: accumCanvas.width,
-                        height: accumCanvas.height
-                    });
+                    var actualW = accumCanvas.width || targetAccumW;
+                    var actualH = accumCanvas.height || targetAccumH;
+                    accumulatedWaveform.width = actualW;
+                    accumulatedWaveform.height = actualH;
+                    
+                    // 若使用 worker，通知其調整 offscreen 尺寸
+                    if (accumulatedWaveform._useWorker && accumulatedWaveform._worker) {
+                        accumulatedWaveform._worker.postMessage({
+                            type: 'resizeCanvas',
+                            width: actualW,
+                            height: actualH
+                        });
+                    }
                 }
                 accumulatedWaveform.draw();
             }
             if (overviewWaveform && overviewCanvas) {
-                overviewWaveform.width = overviewCanvas.width;
-                overviewWaveform.height = overviewCanvas.height;
+                var actualOverviewW = overviewCanvas.width || targetOverviewW;
+                var actualOverviewH = overviewCanvas.height || targetOverviewH;
+                overviewWaveform.width = actualOverviewW;
+                overviewWaveform.height = actualOverviewH;
+                
+                // 若 Overview 也使用 Worker（透過 AccumulatedWaveform 的 Worker），通知調整
+                if (overviewWaveform._useWorker && overviewWaveform._workerRef) {
+                    overviewWaveform._workerRef.postMessage({
+                        type: 'resizeOverview',
+                        width: actualOverviewW,
+                        height: actualOverviewH
+                    });
+                }
                 overviewWaveform.draw();
             }
-        } catch(e){}
+        } catch(e){
+            console.warn('同步 waveform 尺寸時發生錯誤:', e);
+        }
     }
 
     // 第一輪：先嘗試立即調整；為避免剛切換 class 尚未完成排版，再排一個 rAF 二次調整
