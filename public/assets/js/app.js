@@ -234,6 +234,7 @@ var preGainNode = null;      // 前級增益節點（AGC 關閉時可放大）
 var mediaDest = null;        // MediaStreamDestination（供 RecordRTC 使用的處理後串流）
 var micGainUserFactor = 1.0; // 使用者設定的前級增益倍率（預設 1.0x）
 var defaultWindowSeconds = parseFloat(localStorage.getItem('defaultWindowSeconds') || '1.0'); // 使用者設定的預設視窗秒數
+var currentMicStream = null; // 目前的麥克風 MediaStream（便於停止）
 // AudioWorklet PCM 收集
 var workletSupported = false;
 var workletLoaded = false;
@@ -1732,6 +1733,11 @@ AccumulatedWaveform.prototype.draw = function() {
             this.zoomFactor = this.sampleCount / visDec;
             vis = visDec;
         }
+        // 防呆：避免傳入非有限 zoom 或 0 可視樣本導致 worker 計算出錯
+        if (!isFinite(this.zoomFactor) || this.zoomFactor <= 0) {
+            this.zoomFactor = Math.max(1, this.sampleCount || 1);
+        }
+        if (!isFinite(vis) || vis < 1) vis = 1;
         var msg = {
             type: 'draw',
             zoomFactor: this.zoomFactor,
@@ -2262,6 +2268,10 @@ AccumulatedWaveform.prototype.panByPixels = function(pixelDelta) {
     var primaryPixels = isVertical ? this.height : this.width;
     var visibleDec = this.getVisibleSamples();
     var samplesPerPixelDec = visibleDec / primaryPixels;
+    // Raw 模式與極端高倍放大時的最小移動補強（避免 samplesPerPixelDec < 0.1 導致卡住）
+    if (this.rawZoomMode && visibleDec <= 5) {
+        samplesPerPixelDec = Math.max(samplesPerPixelDec, 0.25); // 至少四像素一樣本
+    }
     this._panRemainder += pixelDelta * samplesPerPixelDec;
     var sampleDelta = Math.trunc(this._panRemainder);
     if (sampleDelta !== 0) {
@@ -2337,11 +2347,13 @@ AccumulatedWaveform.prototype.setRawZoomMode = function(enabled){
         showToast('Raw 視窗縮放需 Worklet 模式與原始樣本');
     }
     if (this.rawZoomMode === enabled) { this.draw(); return; }
-    this.rawZoomMode = enabled;
     var dec = Math.max(1, this.decimationFactor||1);
+    // 在切換旗標前先取得目前 decimated 視窗長度
+    var currentVisDec = this.getVisibleSamples();
+    this.rawZoomMode = enabled;
     if (enabled) {
         // 進入 raw 模式：將目前 decimated 視窗轉換為 raw 視窗
-        var visDec = this.getVisibleSamples();
+        var visDec = Math.max(1, currentVisDec);
         this.rawVisibleRaw = Math.max(1, visDec * dec);
         this.rawViewStart = Math.max(0, this.viewStart * dec);
         this._enforceViewBounds();
@@ -2704,6 +2716,8 @@ function captureMicrophone(callback) {
 
     navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
         .then(function(microphone) {
+            // 保存目前麥克風串流參考，供停止時釋放
+            currentMicStream = microphone;
             // 套用前級增益倍率（僅在 AGC 關閉時）
             if (!agcEnabled && preGainNode) {
                 preGainNode.gain.value = Math.min(6, Math.max(1, micGainUserFactor));
@@ -4217,8 +4231,8 @@ function startRecording() {
             // 開始計時顯示
             dateStarted = new Date().getTime();
             (function looper() {
-                // Worklet 模式同樣更新時間顯示；若 recorder 為 null 但 usingWorklet 為 true 仍持續顯示
-                if(!recorder && !usingWorklet) return;
+                // 僅在錄音期間更新，停止後不再排程
+                if (!isCurrentlyRecording) return;
                 document.querySelector('h3').innerHTML = 'Recording Duration: ' +
                     calculateTimeDuration((new Date().getTime() - dateStarted) / 1000);
                 setTimeout(looper, 1000);
@@ -4267,9 +4281,25 @@ function stopRecording() {
         } catch(e){ console.warn('斷開 Worklet 失敗', e); }
         // 組裝最終 PCM -> WAV
         finalizeWorkletRecording();
+        // 關閉麥克風串流
+        try {
+            if (currentMicStream) { currentMicStream.getTracks().forEach(function(t){ try { t.stop(); } catch(e){} }); }
+        } catch(e){ console.warn('停止麥克風串流失敗', e); }
+        currentMicStream = null;
+        usingWorklet = false;
     } else if (recorder) {
         recorder.stopRecording(stopRecordingCallback); // 停止錄音並執行回調
+        // RecordRTC 路徑在 stopRecordingCallback 裡面會呼叫 recorder.microphone.stop()
+        try {
+            if (currentMicStream) { currentMicStream.getTracks().forEach(function(t){ try { t.stop(); } catch(e){} }); }
+        } catch(e){ console.warn('停止麥克風串流失敗', e); }
+        currentMicStream = null;
     }
+
+    // 立即停止即時波形，避免仍連著前級節點導致 VU Meter 跳動
+    try { if (liveWaveform) { liveWaveform.stop(); liveWaveform = null; } } catch(e){}
+    // 解除 audio 元素的即時串流來源
+    try { if (audio && audio.srcObject) { audio.srcObject = null; } } catch(e){}
     
     // 更新狀態變數
     is_ready_to_record = true;               // 設定為準備錄音狀態
@@ -4341,6 +4371,8 @@ function finalizeWorkletRecording(){
         updatePlaybackButtonsState();
         gatherAndRenderSpecs();
         showToast('錄音完成 (Worklet)');
+        // 停止後 VU Meter 若需繼續顯示播放音訊會由 playback source 重新驅動；此處斷開 preGain 與 analyser 以停止原輸入能量
+        try { if (preGainNode) preGainNode.disconnect(analyser); } catch(e){}
     } catch(e){ console.error('finalizeWorkletRecording failed', e); showToast('封裝錄音失敗'); }
 }
 
