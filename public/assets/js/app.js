@@ -419,14 +419,26 @@ document.addEventListener('DOMContentLoaded', function(){
 
 function requestMicAccessForListing() {
     // 先短暫要求音訊存取以取得裝置標籤（某些瀏覽器未授權時 labels 為空）
-    return navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-        .then(function(stream){
-            // 立即停止 tracks
-            stream.getTracks().forEach(function(t){ try { t.stop(); } catch(e){} });
-        }).catch(function(err){
-            // 無法取得授權，交由 UI 顯示提示
-            console.warn('Mic access for listing failed:', err);
-        });
+    // 若已經授權過（navigator.permissions 支援）則不再反覆呼叫 getUserMedia 以免顯示狀態列提示
+    if (navigator.permissions && navigator.permissions.query) {
+        try {
+            return navigator.permissions.query({ name: 'microphone' }).then(function(res){
+                if (res.state === 'granted') {
+                    // 直接返回已解決 Promise，不觸發新的 getUserMedia
+                    return Promise.resolve();
+                }
+                // 未授權或 prompt 才發出一次輕量請求
+                return navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function(stream){
+                    stream.getTracks().forEach(function(t){ try { t.stop(); } catch(e){} });
+                }).catch(function(err){ console.warn('Mic access for listing failed:', err); });
+            });
+        } catch(e){
+            // 例外情況回退舊流程
+        }
+    }
+    return navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function(stream){
+        stream.getTracks().forEach(function(t){ try { t.stop(); } catch(e){} });
+    }).catch(function(err){ console.warn('Mic access for listing failed:', err); });
 }
 
 function populateMicDevices() {
@@ -440,8 +452,15 @@ function populateMicDevices() {
     }
 
     // 如果沒有授權，labels 可能為空 — 先嘗試要求一次權限（忽略失敗）
-    var tryAccess = requestMicAccessForListing();
-    Promise.resolve(tryAccess).finally(function(){
+    // 僅在尚未枚舉過或 labels 仍空時才嘗試一次；避免每次 populate 都觸發 iOS 麥克風橙色點顯示
+    if (!populateMicDevices._hasEnumeratedOnce) {
+        populateMicDevices._hasEnumeratedOnce = true;
+        requestMicAccessForListing().finally(enumerate);
+    } else {
+        enumerate();
+    }
+
+    function enumerate(){
         navigator.mediaDevices.enumerateDevices().then(function(devices){
             var mics = devices.filter(function(d){ return d.kind === 'audioinput'; });
             if (!micSelect) return;
@@ -479,7 +498,7 @@ function populateMicDevices() {
                 micSelect.disabled = true;
             }
         });
-    });
+    }
 }
 
 if (micSelect) {
