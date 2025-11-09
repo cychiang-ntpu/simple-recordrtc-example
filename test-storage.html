@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoiceBank Recorder - Storage Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        
+        h2 {
+            color: #555;
+            font-size: 1.2em;
+            margin-top: 0;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background: #5568d3;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .info {
+            background: #e3f2fd;
+            border-left: 4px solid #2196F3;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        
+        .success {
+            background: #e8f5e9;
+            border-left: 4px solid #4CAF50;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        
+        .error {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        
+        .recordings-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        
+        .recording-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .recording-item:last-child {
+            border-bottom: none;
+        }
+        
+        .recording-info {
+            flex: 1;
+        }
+        
+        .recording-actions button {
+            padding: 5px 10px;
+            font-size: 12px;
+            margin-left: 5px;
+        }
+        
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🎙️ VoiceBank Recorder - 儲存測試</h1>
+        <div class="info">
+            <strong>測試平台：</strong> <span id="platform-info">偵測中...</span>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>📊 IndexedDB 測試</h2>
+        <p>測試瀏覽器本地儲存（無需伺服器）</p>
+        
+        <button id="btn-create-test-recording">創建測試錄音</button>
+        <button id="btn-save-to-indexeddb">儲存到 IndexedDB</button>
+        <button id="btn-list-indexeddb">列出所有錄音</button>
+        <button id="btn-clear-indexeddb">清空 IndexedDB</button>
+        
+        <div id="indexeddb-status"></div>
+        <div id="indexeddb-recordings" class="recordings-list" style="display:none;"></div>
+    </div>
+    
+    <div class="card">
+        <h2>🔧 儲存資訊</h2>
+        <button id="btn-show-storage-info">顯示儲存資訊</button>
+        <pre id="storage-info" style="display:none;"></pre>
+    </div>
+    
+    <script type="module">
+        // 動態導入模組
+        import { IndexedDBAdapter } from '../src/storage/IndexedDBAdapter.js';
+        import { PlatformDetector } from '../src/utils/PlatformDetector.js';
+        
+        // 顯示平台資訊
+        const platformInfo = PlatformDetector.getInfo();
+        document.getElementById('platform-info').textContent = 
+            `${platformInfo.platform} | ${platformInfo.isMobile ? '手機' : '桌面'} | ` +
+            `AudioWorklet: ${platformInfo.supportsAudioWorklet ? '✅' : '❌'}`;
+        
+        // 初始化 IndexedDB Adapter
+        const storage = new IndexedDBAdapter();
+        let testBlob = null;
+        
+        // 創建測試錄音（模擬音訊數據）
+        document.getElementById('btn-create-test-recording').addEventListener('click', () => {
+            // 創建一個簡單的 WAV 檔案（靜音）
+            const sampleRate = 48000;
+            const duration = 2; // 2 秒
+            const numChannels = 1;
+            const numSamples = sampleRate * duration;
+            
+            // 創建 WAV header + data
+            const buffer = new ArrayBuffer(44 + numSamples * 2);
+            const view = new DataView(buffer);
+            
+            // WAV header
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + numSamples * 2, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, numSamples * 2, true);
+            
+            // PCM data (silence)
+            for (let i = 0; i < numSamples; i++) {
+                view.setInt16(44 + i * 2, 0, true);
+            }
+            
+            testBlob = new Blob([buffer], { type: 'audio/wav' });
+            
+            showStatus('indexeddb-status', 
+                `測試錄音已創建 (${(testBlob.size / 1024).toFixed(2)} KB)`, 
+                'success');
+        });
+        
+        // 儲存到 IndexedDB
+        document.getElementById('btn-save-to-indexeddb').addEventListener('click', async () => {
+            if (!testBlob) {
+                showStatus('indexeddb-status', '請先創建測試錄音', 'error');
+                return;
+            }
+            
+            try {
+                const filename = `test-recording-${Date.now()}.wav`;
+                const metadata = {
+                    duration: 2,
+                    sampleRate: 48000,
+                    channels: 1
+                };
+                
+                const id = await storage.save(testBlob, filename, metadata);
+                
+                showStatus('indexeddb-status', 
+                    `✅ 儲存成功！ID: ${id}`, 
+                    'success');
+            } catch (error) {
+                showStatus('indexeddb-status', 
+                    `❌ 儲存失敗：${error.message}`, 
+                    'error');
+            }
+        });
+        
+        // 列出所有錄音
+        document.getElementById('btn-list-indexeddb').addEventListener('click', async () => {
+            try {
+                const recordings = await storage.list();
+                
+                const container = document.getElementById('indexeddb-recordings');
+                container.style.display = 'block';
+                
+                if (recordings.length === 0) {
+                    container.innerHTML = '<p>沒有錄音</p>';
+                    return;
+                }
+                
+                container.innerHTML = recordings.map(rec => `
+                    <div class="recording-item">
+                        <div class="recording-info">
+                            <strong>${rec.filename}</strong><br>
+                            <small>
+                                大小: ${(rec.size / 1024).toFixed(2)} KB | 
+                                時間: ${new Date(rec.timestamp).toLocaleString('zh-TW')}
+                            </small>
+                        </div>
+                        <div class="recording-actions">
+                            <button onclick="playRecording('${rec.id}')">播放</button>
+                            <button onclick="deleteRecording('${rec.id}')">刪除</button>
+                        </div>
+                    </div>
+                `).join('');
+                
+                showStatus('indexeddb-status', 
+                    `找到 ${recordings.length} 筆錄音`, 
+                    'info');
+            } catch (error) {
+                showStatus('indexeddb-status', 
+                    `❌ 列表失敗：${error.message}`, 
+                    'error');
+            }
+        });
+        
+        // 清空 IndexedDB
+        document.getElementById('btn-clear-indexeddb').addEventListener('click', async () => {
+            if (!confirm('確定要清空所有錄音嗎？')) {
+                return;
+            }
+            
+            try {
+                const count = await storage.clear();
+                
+                document.getElementById('indexeddb-recordings').style.display = 'none';
+                showStatus('indexeddb-status', 
+                    `✅ 已清空 ${count} 筆錄音`, 
+                    'success');
+            } catch (error) {
+                showStatus('indexeddb-status', 
+                    `❌ 清空失敗：${error.message}`, 
+                    'error');
+            }
+        });
+        
+        // 顯示儲存資訊
+        document.getElementById('btn-show-storage-info').addEventListener('click', async () => {
+            try {
+                const info = await storage.getStorageInfo();
+                
+                const pre = document.getElementById('storage-info');
+                pre.style.display = 'block';
+                pre.textContent = JSON.stringify(info, null, 2);
+            } catch (error) {
+                showStatus('indexeddb-status', 
+                    `❌ 取得資訊失敗：${error.message}`, 
+                    'error');
+            }
+        });
+        
+        // 播放錄音（全域函數）
+        window.playRecording = async function(id) {
+            try {
+                const blob = await storage.load(id);
+                const url = URL.createObjectURL(blob);
+                
+                const audio = new Audio(url);
+                audio.play();
+                
+                audio.onended = () => {
+                    URL.revokeObjectURL(url);
+                };
+                
+                showStatus('indexeddb-status', 
+                    `播放錄音 ID: ${id}`, 
+                    'info');
+            } catch (error) {
+                showStatus('indexeddb-status', 
+                    `❌ 播放失敗：${error.message}`, 
+                    'error');
+            }
+        };
+        
+        // 刪除錄音（全域函數）
+        window.deleteRecording = async function(id) {
+            if (!confirm('確定要刪除這筆錄音嗎？')) {
+                return;
+            }
+            
+            try {
+                await storage.delete(id);
+                
+                showStatus('indexeddb-status', 
+                    `✅ 已刪除錄音 ID: ${id}`, 
+                    'success');
+                
+                // 重新列出
+                document.getElementById('btn-list-indexeddb').click();
+            } catch (error) {
+                showStatus('indexeddb-status', 
+                    `❌ 刪除失敗：${error.message}`, 
+                    'error');
+            }
+        };
+        
+        // 輔助函數
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+        
+        function showStatus(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.className = type;
+            element.textContent = message;
+            element.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
