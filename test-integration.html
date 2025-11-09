@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VoiceBank Recorder - 整合測試</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 10px;
+      padding: 30px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+    }
+    
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+    }
+    
+    .test-section {
+      margin-bottom: 40px;
+      padding: 20px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+    }
+    
+    .test-section h2 {
+      color: #667eea;
+      margin-bottom: 15px;
+      font-size: 1.3em;
+    }
+    
+    .test-section.pass {
+      border-color: #10b981;
+      background: #f0fdf4;
+    }
+    
+    .test-section.fail {
+      border-color: #ef4444;
+      background: #fef2f2;
+    }
+    
+    .test-section.pending {
+      border-color: #f59e0b;
+      background: #fffbeb;
+    }
+    
+    .test-result {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 5px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+    }
+    
+    .test-result.pass {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    
+    .test-result.fail {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    
+    .test-result.info {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+    
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: 600;
+      margin: 5px;
+      transition: all 0.3s ease;
+    }
+    
+    button.primary {
+      background: #667eea;
+      color: white;
+    }
+    
+    button.primary:hover {
+      background: #5568d3;
+    }
+    
+    button.danger {
+      background: #ef4444;
+      color: white;
+    }
+    
+    button.danger:hover {
+      background: #dc2626;
+    }
+    
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .summary {
+      background: #f9fafb;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+    }
+    
+    .summary h2 {
+      color: #333;
+      margin-bottom: 15px;
+    }
+    
+    .summary-stats {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    
+    .stat-box {
+      flex: 1;
+      min-width: 150px;
+      padding: 15px;
+      border-radius: 5px;
+      text-align: center;
+    }
+    
+    .stat-box.pass {
+      background: #d1fae5;
+    }
+    
+    .stat-box.fail {
+      background: #fee2e2;
+    }
+    
+    .stat-box.pending {
+      background: #fef3c7;
+    }
+    
+    .stat-box .number {
+      font-size: 2em;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+    
+    .stat-box .label {
+      color: #666;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧪 VoiceBank Recorder 整合測試</h1>
+    <p class="subtitle">驗證所有模組整合</p>
+    
+    <!-- 測試摘要 -->
+    <div class="summary">
+      <h2>測試摘要</h2>
+      <div class="summary-stats">
+        <div class="stat-box pass">
+          <div class="number" id="pass-count">0</div>
+          <div class="label">通過</div>
+        </div>
+        <div class="stat-box fail">
+          <div class="number" id="fail-count">0</div>
+          <div class="label">失敗</div>
+        </div>
+        <div class="stat-box pending">
+          <div class="number" id="pending-count">0</div>
+          <div class="label">待測試</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 測試 1: 模組載入 -->
+    <div class="test-section" id="test-module-loading">
+      <h2>1️⃣ 模組載入測試</h2>
+      <button class="primary" onclick="runModuleLoadingTests()">執行測試</button>
+      <div id="module-loading-results"></div>
+    </div>
+    
+    <!-- 測試 2: AudioEngine -->
+    <div class="test-section" id="test-audioengine">
+      <h2>2️⃣ AudioEngine 測試</h2>
+      <button class="primary" onclick="runAudioEngineTests()">執行測試</button>
+      <div id="audioengine-results"></div>
+    </div>
+    
+    <!-- 測試 3: WaveformRenderer -->
+    <div class="test-section" id="test-waveform">
+      <h2>3️⃣ WaveformRenderer 測試</h2>
+      <button class="primary" onclick="runWaveformTests()">執行測試</button>
+      <div id="waveform-results"></div>
+    </div>
+    
+    <!-- 測試 4: RecorderUI -->
+    <div class="test-section" id="test-recorderui">
+      <h2>4️⃣ RecorderUI 測試</h2>
+      <button class="primary" onclick="runRecorderUITests()">執行測試</button>
+      <div id="recorderui-results"></div>
+    </div>
+    
+    <!-- 測試 5: 整合測試 -->
+    <div class="test-section" id="test-integration">
+      <h2>5️⃣ 整合測試</h2>
+      <button class="primary" onclick="runIntegrationTests()">執行測試</button>
+      <div id="integration-results"></div>
+    </div>
+    
+    <!-- 全部執行 -->
+    <div style="text-align: center; margin-top: 30px;">
+      <button class="primary" style="font-size: 1.2em; padding: 15px 40px;" onclick="runAllTests()">
+        🚀 執行所有測試
+      </button>
+    </div>
+  </div>
+  
+  <!-- 載入建置後的庫 -->
+  <script src="./dist/voicebank-recorder.js"></script>
+  
+  <script>
+    // 測試統計
+    let stats = {
+      pass: 0,
+      fail: 0,
+      pending: 5
+    };
+    
+    // 更新統計顯示
+    function updateStats() {
+      document.getElementById('pass-count').textContent = stats.pass;
+      document.getElementById('fail-count').textContent = stats.fail;
+      document.getElementById('pending-count').textContent = stats.pending;
+    }
+    
+    // 測試結果輔助函數
+    function addTestResult(containerId, message, status) {
+      const container = document.getElementById(containerId);
+      const result = document.createElement('div');
+      result.className = `test-result ${status}`;
+      result.textContent = message;
+      container.appendChild(result);
+      return status === 'pass';
+    }
+    
+    function setTestStatus(sectionId, status) {
+      const section = document.getElementById(sectionId);
+      section.className = 'test-section ' + status;
+      if (status === 'pass') {
+        stats.pass++;
+        stats.pending--;
+      } else if (status === 'fail') {
+        stats.fail++;
+        stats.pending--;
+      }
+      updateStats();
+    }
+    
+    // 測試 1: 模組載入
+    function runModuleLoadingTests() {
+      const containerId = 'module-loading-results';
+      document.getElementById(containerId).innerHTML = '';
+      
+      let allPassed = true;
+      
+      // 檢查全局變數
+      if (typeof VoiceBankRecorder !== 'undefined') {
+        addTestResult(containerId, '✓ VoiceBankRecorder 全局變數已定義', 'pass');
+      } else {
+        addTestResult(containerId, '✗ VoiceBankRecorder 全局變數未定義', 'fail');
+        allPassed = false;
+      }
+      
+      // 檢查各個模組
+      const modules = ['AudioEngine', 'WaveformRenderer', 'RecorderUI', 'StorageFactory'];
+      modules.forEach(moduleName => {
+        if (VoiceBankRecorder[moduleName]) {
+          addTestResult(containerId, `✓ ${moduleName} 模組已載入`, 'pass');
+        } else {
+          addTestResult(containerId, `✗ ${moduleName} 模組未載入`, 'fail');
+          allPassed = false;
+        }
+      });
+      
+      // 檢查儲存適配器
+      const adapters = ['IndexedDBAdapter', 'ServerAdapter'];
+      adapters.forEach(adapterName => {
+        if (VoiceBankRecorder[adapterName]) {
+          addTestResult(containerId, `✓ ${adapterName} 已載入`, 'pass');
+        } else {
+          addTestResult(containerId, `✗ ${adapterName} 未載入`, 'fail');
+          allPassed = false;
+        }
+      });
+      
+      setTestStatus('test-module-loading', allPassed ? 'pass' : 'fail');
+    }
+    
+    // 測試 2: AudioEngine
+    async function runAudioEngineTests() {
+      const containerId = 'audioengine-results';
+      document.getElementById(containerId).innerHTML = '';
+      
+      let allPassed = true;
+      
+      try {
+        // 創建實例
+        const engine = new VoiceBankRecorder.AudioEngine({
+          audioWorklet: false,  // 測試用禁用 AudioWorklet
+          sampleRate: 48000
+        });
+        addTestResult(containerId, '✓ AudioEngine 實例創建成功', 'pass');
+        
+        // 檢查方法
+        const methods = ['startRecording', 'stopRecording', 'on', 'off', 'once'];
+        methods.forEach(method => {
+          if (typeof engine[method] === 'function') {
+            addTestResult(containerId, `✓ ${method}() 方法存在`, 'pass');
+          } else {
+            addTestResult(containerId, `✗ ${method}() 方法不存在`, 'fail');
+            allPassed = false;
+          }
+        });
+        
+        // 檢查事件系統
+        let eventFired = false;
+        engine.once('test-event', () => { eventFired = true; });
+        engine.emit('test-event');
+        
+        if (eventFired) {
+          addTestResult(containerId, '✓ 事件系統正常運作', 'pass');
+        } else {
+          addTestResult(containerId, '✗ 事件系統異常', 'fail');
+          allPassed = false;
+        }
+        
+      } catch (error) {
+        addTestResult(containerId, `✗ AudioEngine 測試失敗: ${error.message}`, 'fail');
+        allPassed = false;
+      }
+      
+      setTestStatus('test-audioengine', allPassed ? 'pass' : 'fail');
+    }
+    
+    // 測試 3: WaveformRenderer
+    function runWaveformTests() {
+      const containerId = 'waveform-results';
+      document.getElementById(containerId).innerHTML = '';
+      
+      let allPassed = true;
+      
+      try {
+        // 創建測試用 Canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = 800;
+        canvas.height = 200;
+        
+        // 創建假的 AudioEngine
+        const fakeEngine = {
+          on: () => {},
+          off: () => {},
+          once: () => {},
+          emit: () => {}
+        };
+        
+        // 創建實例
+        const renderer = new VoiceBankRecorder.WaveformRenderer({
+          liveCanvas: canvas,
+          audioEngine: fakeEngine,
+          useWorker: false
+        });
+        addTestResult(containerId, '✓ WaveformRenderer 實例創建成功', 'pass');
+        
+        // 檢查方法
+        const methods = ['start', 'stop', 'reset', 'resize', 'setVerticalMode'];
+        methods.forEach(method => {
+          if (typeof renderer[method] === 'function') {
+            addTestResult(containerId, `✓ ${method}() 方法存在`, 'pass');
+          } else {
+            addTestResult(containerId, `✗ ${method}() 方法不存在`, 'fail');
+            allPassed = false;
+          }
+        });
+        
+      } catch (error) {
+        addTestResult(containerId, `✗ WaveformRenderer 測試失敗: ${error.message}`, 'fail');
+        allPassed = false;
+      }
+      
+      setTestStatus('test-waveform', allPassed ? 'pass' : 'fail');
+    }
+    
+    // 測試 4: RecorderUI
+    async function runRecorderUITests() {
+      const containerId = 'recorderui-results';
+      document.getElementById(containerId).innerHTML = '';
+      
+      let allPassed = true;
+      
+      try {
+        // 創建測試容器
+        const testContainer = document.createElement('div');
+        testContainer.id = 'test-ui-container';
+        testContainer.style.display = 'none';
+        document.body.appendChild(testContainer);
+        
+        // 創建假的核心模組
+        const fakeEngine = {
+          on: () => {},
+          off: () => {},
+          once: () => {},
+          emit: () => {}
+        };
+        
+        const fakeRenderer = {
+          start: () => {},
+          stop: () => {},
+          reset: () => {},
+          resize: () => {},
+          setVerticalMode: () => {}
+        };
+        
+        // 創建 RecorderUI 實例
+        const ui = new VoiceBankRecorder.RecorderUI(testContainer, {
+          audioEngine: fakeEngine,
+          waveformRenderer: fakeRenderer
+        });
+        addTestResult(containerId, '✓ RecorderUI 實例創建成功', 'pass');
+        
+        // 檢查方法
+        const methods = ['initialize', 'getState', 'setOptions', 'destroy'];
+        methods.forEach(method => {
+          if (typeof ui[method] === 'function') {
+            addTestResult(containerId, `✓ ${method}() 方法存在`, 'pass');
+          } else {
+            addTestResult(containerId, `✗ ${method}() 方法不存在`, 'fail');
+            allPassed = false;
+          }
+        });
+        
+        // 測試初始化
+        await ui.initialize();
+        addTestResult(containerId, '✓ UI 初始化成功', 'pass');
+        
+        // 檢查 DOM 是否渲染
+        if (testContainer.querySelector('.voicebank-recorder')) {
+          addTestResult(containerId, '✓ UI DOM 結構已渲染', 'pass');
+        } else {
+          addTestResult(containerId, '✗ UI DOM 結構未渲染', 'fail');
+          allPassed = false;
+        }
+        
+        // 清理
+        ui.destroy();
+        document.body.removeChild(testContainer);
+        
+      } catch (error) {
+        addTestResult(containerId, `✗ RecorderUI 測試失敗: ${error.message}`, 'fail');
+        allPassed = false;
+      }
+      
+      setTestStatus('test-recorderui', allPassed ? 'pass' : 'fail');
+    }
+    
+    // 測試 5: 整合測試
+    async function runIntegrationTests() {
+      const containerId = 'integration-results';
+      document.getElementById(containerId).innerHTML = '';
+      
+      let allPassed = true;
+      
+      try {
+        addTestResult(containerId, 'ℹ️ 開始整合測試...', 'info');
+        
+        // 創建完整的堆疊
+        const engine = new VoiceBankRecorder.AudioEngine({
+          audioWorklet: false,
+          sampleRate: 48000
+        });
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = 800;
+        canvas.height = 200;
+        
+        const renderer = new VoiceBankRecorder.WaveformRenderer({
+          liveCanvas: canvas,
+          audioEngine: engine,
+          useWorker: false
+        });
+        
+        const testContainer = document.createElement('div');
+        testContainer.style.display = 'none';
+        document.body.appendChild(testContainer);
+        
+        const ui = new VoiceBankRecorder.RecorderUI(testContainer, {
+          audioEngine: engine,
+          waveformRenderer: renderer
+        });
+        
+        await ui.initialize();
+        
+        addTestResult(containerId, '✓ 所有模組成功整合', 'pass');
+        
+        // 測試事件流
+        let eventReceived = false;
+        engine.once('recording-start', () => {
+          eventReceived = true;
+        });
+        
+        engine.emit('recording-start');
+        
+        if (eventReceived) {
+          addTestResult(containerId, '✓ 模組間事件通信正常', 'pass');
+        } else {
+          addTestResult(containerId, '✗ 模組間事件通信異常', 'fail');
+          allPassed = false;
+        }
+        
+        // 清理
+        ui.destroy();
+        document.body.removeChild(testContainer);
+        
+        addTestResult(containerId, '✓ 整合測試完成', 'pass');
+        
+      } catch (error) {
+        addTestResult(containerId, `✗ 整合測試失敗: ${error.message}`, 'fail');
+        console.error('Integration test error:', error);
+        allPassed = false;
+      }
+      
+      setTestStatus('test-integration', allPassed ? 'pass' : 'fail');
+    }
+    
+    // 執行所有測試
+    async function runAllTests() {
+      stats = { pass: 0, fail: 0, pending: 5 };
+      updateStats();
+      
+      runModuleLoadingTests();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      await runAudioEngineTests();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      runWaveformTests();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      await runRecorderUITests();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      await runIntegrationTests();
+    }
+    
+    // 初始化統計
+    updateStats();
+  </script>
+</body>
+</html>

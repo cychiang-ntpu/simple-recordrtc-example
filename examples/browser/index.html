@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VoiceBank Recorder - 瀏覽器範例</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    
+    .container {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      padding: 40px;
+      max-width: 900px;
+      width: 100%;
+    }
+    
+    h1 {
+      text-align: center;
+      color: #667eea;
+      margin-bottom: 10px;
+      font-size: 2.5em;
+    }
+    
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 1.1em;
+    }
+    
+    .info-box {
+      background: #f0f4ff;
+      border-left: 4px solid #667eea;
+      padding: 15px 20px;
+      margin-bottom: 30px;
+      border-radius: 5px;
+    }
+    
+    .info-box h3 {
+      color: #667eea;
+      margin-bottom: 10px;
+    }
+    
+    .info-box ul {
+      list-style-position: inside;
+      color: #555;
+    }
+    
+    .info-box li {
+      margin-bottom: 5px;
+    }
+    
+    /* VoiceBank Recorder UI Styles */
+    .voicebank-recorder {
+      margin-top: 20px;
+    }
+    
+    .recorder-controls {
+      text-align: center;
+      margin-bottom: 20px;
+      padding: 20px;
+      background: #f9fafb;
+      border-radius: 10px;
+    }
+    
+    .recorder-controls button {
+      font-size: 16px;
+      padding: 12px 30px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .btn-record {
+      background: #ef4444;
+      color: white;
+    }
+    
+    .btn-record:hover:not(:disabled) {
+      background: #dc2626;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+    }
+    
+    .btn-record.recording {
+      background: #f59e0b;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    
+    .recording-info {
+      margin-top: 15px;
+      font-size: 14px;
+      color: #666;
+    }
+    
+    .recording-info span {
+      margin: 0 10px;
+    }
+    
+    .waveform-wrapper {
+      margin: 20px 0;
+    }
+    
+    .waveform-section {
+      margin-bottom: 20px;
+    }
+    
+    .waveform-section label {
+      display: block;
+      font-weight: 600;
+      color: #555;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    
+    .waveform-section canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #f9fafb;
+    }
+    
+    .playback-controls {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin: 20px 0;
+      padding: 20px;
+      background: #f9fafb;
+      border-radius: 10px;
+    }
+    
+    .playback-controls button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .btn-play {
+      background: #10b981;
+      color: white;
+    }
+    
+    .btn-play:hover:not(:disabled) {
+      background: #059669;
+      transform: translateY(-2px);
+    }
+    
+    .btn-pause {
+      background: #f59e0b;
+      color: white;
+    }
+    
+    .btn-pause:hover:not(:disabled) {
+      background: #d97706;
+      transform: translateY(-2px);
+    }
+    
+    .btn-stop {
+      background: #ef4444;
+      color: white;
+    }
+    
+    .btn-stop:hover:not(:disabled) {
+      background: #dc2626;
+      transform: translateY(-2px);
+    }
+    
+    .playback-controls button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .toolbar {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    
+    .toolbar button {
+      padding: 10px 20px;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      background: white;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      color: #555;
+      transition: all 0.3s ease;
+    }
+    
+    .toolbar button:hover:not(:disabled) {
+      border-color: #667eea;
+      color: #667eea;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+    }
+    
+    .toolbar button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .status-log {
+      margin-top: 30px;
+      padding: 20px;
+      background: #1f2937;
+      color: #10b981;
+      border-radius: 10px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.8;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    
+    .status-log .log-entry {
+      margin-bottom: 5px;
+    }
+    
+    .status-log .log-time {
+      color: #6b7280;
+      margin-right: 10px;
+    }
+    
+    .status-log .log-error {
+      color: #ef4444;
+    }
+    
+    .status-log .log-warning {
+      color: #f59e0b;
+    }
+    
+    .status-log .log-info {
+      color: #3b82f6;
+    }
+    
+    footer {
+      margin-top: 30px;
+      text-align: center;
+      color: #999;
+      font-size: 14px;
+    }
+    
+    footer a {
+      color: #667eea;
+      text-decoration: none;
+    }
+    
+    footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎙️ VoiceBank Recorder</h1>
+    <p class="subtitle">跨平台音訊錄音庫 - 瀏覽器範例</p>
+    
+    <div class="info-box">
+      <h3>📋 使用說明</h3>
+      <ul>
+        <li>點擊「開始錄音」按鈕開始錄製音訊</li>
+        <li>即時查看波形和音量表</li>
+        <li>點擊「停止錄音」結束錄製</li>
+        <li>使用播放控制按鈕播放錄音</li>
+        <li>儲存錄音到 IndexedDB（瀏覽器本地儲存）</li>
+      </ul>
+    </div>
+    
+    <!-- VoiceBank Recorder UI 將在這裡渲染 -->
+    <div id="voicebank-container"></div>
+    
+    <!-- 狀態日誌 -->
+    <div class="status-log" id="status-log">
+      <div class="log-entry">
+        <span class="log-time">[00:00:00]</span>
+        <span class="log-info">📊 準備初始化 VoiceBank Recorder...</span>
+      </div>
+    </div>
+    
+    <footer>
+      <p>
+        Built with ❤️ using 
+        <a href="https://github.com/cychiang-ntpu/simple-recordrtc-example" target="_blank">VoiceBank Recorder</a>
+      </p>
+      <p>支援平台：Browser | Electron | Capacitor</p>
+    </footer>
+  </div>
+  
+  <!-- 載入建置後的 VoiceBank Recorder 庫 -->
+  <script src="../../dist/voicebank-recorder.min.js"></script>
+  
+  <script>
+    // 日誌函數
+    const logContainer = document.getElementById('status-log');
+    
+    function log(message, type = 'info') {
+      const time = new Date().toLocaleTimeString('zh-TW');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `
+        <span class="log-time">[${time}]</span>
+        <span class="log-${type}">${message}</span>
+      `;
+      logContainer.appendChild(entry);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+    
+    // 初始化 VoiceBank Recorder
+    async function initRecorder() {
+      try {
+        log('🔧 初始化 AudioEngine...', 'info');
+        
+        // 創建 AudioEngine 實例
+        const audioEngine = new VoiceBankRecorder.AudioEngine({
+          audioWorklet: true,  // 使用 AudioWorklet
+          sampleRate: 48000,
+          channelCount: 1
+        });
+        
+        log('🎨 初始化 WaveformRenderer...', 'info');
+        
+        // 創建 WaveformRenderer 實例
+        const waveformRenderer = new VoiceBankRecorder.WaveformRenderer({
+          liveCanvas: document.getElementById('vbr-live-waveform'),
+          vuMeterCanvas: document.getElementById('vbr-vu-meter'),
+          accumulatedCanvas: document.getElementById('vbr-accumulated-waveform'),
+          overviewCanvas: document.getElementById('vbr-overview-waveform'),
+          audioEngine: audioEngine,
+          useWorker: false  // 暫時不使用 Worker
+        });
+        
+        log('🖥️ 初始化 RecorderUI...', 'info');
+        
+        // 創建 RecorderUI 實例
+        const recorderUI = new VoiceBankRecorder.RecorderUI('#voicebank-container', {
+          audioEngine: audioEngine,
+          waveformRenderer: waveformRenderer,
+          layout: 'auto',
+          theme: 'light',
+          showOverview: true,
+          callbacks: {
+            onRecordStart: () => {
+              log('🎙️ 錄音開始', 'info');
+            },
+            onRecordStop: (data) => {
+              log(`⏹️ 錄音停止 - 時長: ${data.duration.toFixed(2)}s, 樣本數: ${data.sampleCount}`, 'info');
+            },
+            onPlayStart: () => {
+              log('▶️ 播放開始', 'info');
+            },
+            onPlayStop: () => {
+              log('⏹️ 播放停止', 'info');
+            },
+            onError: (error) => {
+              log(`❌ 錯誤: ${error.message}`, 'error');
+              console.error('Recorder Error:', error);
+            }
+          }
+        });
+        
+        // 初始化 UI
+        await recorderUI.initialize();
+        
+        log('✅ VoiceBank Recorder 初始化完成！', 'info');
+        log('👉 點擊「開始錄音」按鈕開始錄製', 'info');
+        
+        // 將實例保存到全局（方便除錯）
+        window.recorderUI = recorderUI;
+        window.audioEngine = audioEngine;
+        window.waveformRenderer = waveformRenderer;
+        
+      } catch (error) {
+        log(`❌ 初始化失敗: ${error.message}`, 'error');
+        console.error('Initialization error:', error);
+      }
+    }
+    
+    // 頁面載入完成後初始化
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initRecorder);
+    } else {
+      initRecorder();
+    }
+  </script>
+</body>
+</html>
