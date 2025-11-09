@@ -17,6 +17,423 @@
 })(this, (function (exports) { 'use strict';
 
     /**
+     * DeviceManager.js
+     * 音訊裝置管理模組 - 處理麥克風和輸出裝置的列舉、選擇、記憶
+     * 
+     * @module DeviceManager
+     * @description 提供完整的音訊裝置管理功能，包含：
+     * - 裝置列舉 (enumerateDevices)
+     * - 裝置選擇與記憶 (localStorage)
+     * - 裝置變更偵測 (devicechange event)
+     * - 跨平台相容性處理
+     */
+
+    /**
+     * DeviceManager - 音訊裝置管理器
+     * 統一管理麥克風和輸出裝置的列舉、選擇與持久化
+     */
+    class DeviceManager {
+      /**
+       * @param {Object} options - 配置選項
+       * @param {string} [options.micStorageKey='preferredMicDeviceId'] - 麥克風偏好設定的 localStorage key
+       * @param {string} [options.outputStorageKey='preferredOutputDeviceId'] - 輸出裝置偏好設定的 localStorage key
+       * @param {boolean} [options.autoLoadPreferences=true] - 是否自動載入上次的偏好設定
+       * @param {boolean} [options.autoRequestPermission=true] - 列舉前是否自動請求麥克風權限
+       */
+      constructor(options = {}) {
+        this.options = {
+          micStorageKey: 'preferredMicDeviceId',
+          outputStorageKey: 'preferredOutputDeviceId',
+          autoLoadPreferences: true,
+          autoRequestPermission: true,
+          ...options
+        };
+
+        // 裝置清單
+        this.microphoneDevices = [];
+        this.outputDevices = [];
+
+        // 當前選擇的裝置 ID
+        this.selectedMicDeviceId = '';
+        this.selectedOutputDeviceId = 'default';
+
+        // 事件監聽器
+        this._eventListeners = {
+          'devicechange': [],
+          'micchange': [],
+          'outputchange': []
+        };
+
+        // 裝置變更監聽器
+        this._deviceChangeListener = null;
+
+        // 自動載入偏好設定
+        if (this.options.autoLoadPreferences) {
+          this.loadPreferences();
+        }
+      }
+
+      /**
+       * 從 localStorage 載入上次的裝置偏好設定
+       */
+      loadPreferences() {
+        console.log('[DeviceManager] loadPreferences 被呼叫');
+        try {
+          const savedMicId = localStorage.getItem(this.options.micStorageKey);
+          const savedOutputId = localStorage.getItem(this.options.outputStorageKey);
+          console.log(`[DeviceManager] localStorage 中的值:`);
+          console.log(`  - ${this.options.micStorageKey}: "${savedMicId}"`);
+          console.log(`  - ${this.options.outputStorageKey}: "${savedOutputId}"`);
+          if (savedMicId) {
+            this.selectedMicDeviceId = savedMicId;
+            console.log(`[DeviceManager] 已載入麥克風偏好: ${savedMicId}`);
+          } else {
+            console.log(`[DeviceManager] 沒有儲存的麥克風偏好`);
+          }
+          if (savedOutputId) {
+            this.selectedOutputDeviceId = savedOutputId;
+            console.log(`[DeviceManager] 已載入輸出裝置偏好: ${savedOutputId}`);
+          } else {
+            console.log(`[DeviceManager] 沒有儲存的輸出裝置偏好，使用 default`);
+          }
+        } catch (error) {
+          console.warn('[DeviceManager] Failed to load device preferences:', error);
+        }
+      }
+
+      /**
+       * 儲存裝置偏好設定到 localStorage
+       * @param {string} type - 'microphone' 或 'output'
+       * @param {string} deviceId - 裝置 ID
+       */
+      savePreference(type, deviceId) {
+        try {
+          if (type === 'microphone') {
+            localStorage.setItem(this.options.micStorageKey, deviceId);
+            this.selectedMicDeviceId = deviceId;
+          } else if (type === 'output') {
+            localStorage.setItem(this.options.outputStorageKey, deviceId);
+            this.selectedOutputDeviceId = deviceId;
+          }
+        } catch (error) {
+          console.warn('Failed to save device preference:', error);
+        }
+      }
+
+      /**
+       * 檢查瀏覽器是否支援裝置列舉
+       * @returns {boolean}
+       */
+      isSupported() {
+        return !!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices);
+      }
+
+      /**
+       * 請求麥克風權限（必要時）
+       * @returns {Promise<void>}
+       */
+      async requestMicrophonePermission() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('getUserMedia is not supported in this browser');
+        }
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: true
+          });
+          // 立即停止所有 track，只是為了獲取權限
+          stream.getTracks().forEach(track => track.stop());
+        } catch (error) {
+          throw new Error(`Failed to request microphone permission: ${error.message}`);
+        }
+      }
+
+      /**
+       * 列舉所有麥克風裝置
+       * @param {boolean} [requestPermission=true] - 是否先請求權限
+       * @returns {Promise<Array>} 麥克風裝置清單
+       */
+      async enumerateMicrophones(requestPermission = this.options.autoRequestPermission) {
+        if (!this.isSupported()) {
+          throw new Error('Device enumeration is not supported in this browser');
+        }
+        try {
+          // 如果需要，先請求權限
+          if (requestPermission) {
+            try {
+              await this.requestMicrophonePermission();
+            } catch (error) {
+              // 忽略權限錯誤，繼續嘗試列舉（可能已經有權限）
+              console.warn('Permission request failed, continuing anyway:', error);
+            }
+          }
+
+          // 列舉所有裝置
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          this.microphoneDevices = devices.filter(device => device.kind === 'audioinput');
+          return this.microphoneDevices;
+        } catch (error) {
+          throw new Error(`Failed to enumerate microphones: ${error.message}`);
+        }
+      }
+
+      /**
+       * 列舉所有輸出裝置
+       * @returns {Promise<Array>} 輸出裝置清單
+       */
+      async enumerateOutputDevices() {
+        if (!this.isSupported()) {
+          throw new Error('Device enumeration is not supported in this browser');
+        }
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          this.outputDevices = devices.filter(device => device.kind === 'audiooutput');
+          return this.outputDevices;
+        } catch (error) {
+          throw new Error(`Failed to enumerate output devices: ${error.message}`);
+        }
+      }
+
+      /**
+       * 列舉所有裝置（麥克風 + 輸出）
+       * @param {boolean} [requestPermission=true] - 是否先請求麥克風權限
+       * @returns {Promise<Object>} { microphones, outputs }
+       */
+      async enumerateAllDevices(requestPermission = this.options.autoRequestPermission) {
+        const [microphones, outputs] = await Promise.all([this.enumerateMicrophones(requestPermission), this.enumerateOutputDevices()]);
+        return {
+          microphones,
+          outputs
+        };
+      }
+
+      /**
+       * 選擇麥克風裝置
+       * @param {string} deviceId - 裝置 ID
+       * @param {boolean} [save=true] - 是否儲存偏好設定
+       */
+      selectMicrophone(deviceId, save = true) {
+        console.log(`[DeviceManager] selectMicrophone 被呼叫:`, {
+          deviceId,
+          save
+        });
+        console.log(`[DeviceManager] 變更前: selectedMicDeviceId = "${this.selectedMicDeviceId}"`);
+        this.selectedMicDeviceId = deviceId;
+        console.log(`[DeviceManager] 變更後: selectedMicDeviceId = "${this.selectedMicDeviceId}"`);
+        if (save) {
+          this.savePreference('microphone', deviceId);
+          console.log(`[DeviceManager] 已儲存至 localStorage (${this.options.micStorageKey})`);
+        }
+
+        // 觸發 micchange 事件
+        this._emit('micchange', {
+          deviceId
+        });
+      }
+
+      /**
+       * 選擇輸出裝置
+       * @param {string} deviceId - 裝置 ID
+       * @param {boolean} [save=true] - 是否儲存偏好設定
+       */
+      selectOutputDevice(deviceId, save = true) {
+        this.selectedOutputDeviceId = deviceId;
+        if (save) {
+          this.savePreference('output', deviceId);
+        }
+
+        // 觸發 outputchange 事件
+        this._emit('outputchange', {
+          deviceId
+        });
+      }
+
+      /**
+       * 取得當前選擇的麥克風裝置 ID
+       * @returns {string}
+       */
+      getSelectedMicrophoneId() {
+        return this.selectedMicDeviceId;
+      }
+
+      /**
+       * 取得當前選擇的輸出裝置 ID
+       * @returns {string}
+       */
+      getSelectedOutputDeviceId() {
+        return this.selectedOutputDeviceId;
+      }
+
+      /**
+       * 取得當前選擇的麥克風裝置資訊
+       * @returns {MediaDeviceInfo|null}
+       */
+      getSelectedMicrophone() {
+        return this.microphoneDevices.find(device => device.deviceId === this.selectedMicDeviceId) || null;
+      }
+
+      /**
+       * 取得當前選擇的輸出裝置資訊
+       * @returns {MediaDeviceInfo|null}
+       */
+      getSelectedOutputDevice() {
+        return this.outputDevices.find(device => device.deviceId === this.selectedOutputDeviceId) || null;
+      }
+
+      /**
+       * 建立適用於 getUserMedia 的約束條件
+       * @param {Object} [additionalConstraints={}] - 額外的音訊約束
+       * @returns {Object} MediaStreamConstraints
+       */
+      getMicrophoneConstraints(additionalConstraints = {}) {
+        console.log(`[DeviceManager] getMicrophoneConstraints 被呼叫`);
+        console.log(`[DeviceManager] 當前 selectedMicDeviceId = "${this.selectedMicDeviceId}"`);
+        const constraints = {
+          audio: {
+            ...additionalConstraints
+          },
+          video: false
+        };
+
+        // 如果有選擇特定裝置，加入 deviceId 約束
+        if (this.selectedMicDeviceId) {
+          constraints.audio.deviceId = {
+            exact: this.selectedMicDeviceId
+          };
+          console.log(`[DeviceManager] 已加入 deviceId 約束: ${this.selectedMicDeviceId}`);
+        } else {
+          console.log(`[DeviceManager] 沒有選擇特定裝置，使用系統預設`);
+        }
+        return constraints;
+      }
+
+      /**
+       * 為 Audio 元素設定輸出裝置
+       * @param {HTMLAudioElement} audioElement - Audio 元素
+       * @param {string} [deviceId] - 裝置 ID（不提供則使用當前選擇的裝置）
+       * @returns {Promise<void>}
+       */
+      async setAudioOutputDevice(audioElement, deviceId) {
+        const targetDeviceId = deviceId || this.selectedOutputDeviceId;
+
+        // 檢查瀏覽器是否支援 setSinkId
+        if (typeof audioElement.setSinkId !== 'function') {
+          console.warn('setSinkId is not supported in this browser');
+          return;
+        }
+        try {
+          await audioElement.setSinkId(targetDeviceId);
+        } catch (error) {
+          throw new Error(`Failed to set audio output device: ${error.message}`);
+        }
+      }
+
+      /**
+       * 檢查指定裝置是否仍然存在
+       * @param {string} deviceId - 裝置 ID
+       * @param {string} type - 'microphone' 或 'output'
+       * @returns {boolean}
+       */
+      isDeviceAvailable(deviceId, type) {
+        const devices = type === 'microphone' ? this.microphoneDevices : this.outputDevices;
+        return devices.some(device => device.deviceId === deviceId);
+      }
+
+      /**
+       * 啟動裝置變更監聽
+       * 當裝置插拔時自動重新列舉
+       */
+      startDeviceChangeMonitoring() {
+        if (!navigator.mediaDevices || this._deviceChangeListener) {
+          return; // 不支援或已經在監聽
+        }
+        this._deviceChangeListener = async () => {
+          try {
+            // 重新列舉裝置
+            await this.enumerateAllDevices(false); // 不需要重新請求權限
+
+            // 觸發 devicechange 事件
+            this._emit('devicechange', {
+              microphones: this.microphoneDevices,
+              outputs: this.outputDevices
+            });
+          } catch (error) {
+            console.error('Device change enumeration failed:', error);
+          }
+        };
+        navigator.mediaDevices.addEventListener('devicechange', this._deviceChangeListener);
+      }
+
+      /**
+       * 停止裝置變更監聽
+       */
+      stopDeviceChangeMonitoring() {
+        if (this._deviceChangeListener && navigator.mediaDevices) {
+          navigator.mediaDevices.removeEventListener('devicechange', this._deviceChangeListener);
+          this._deviceChangeListener = null;
+        }
+      }
+
+      /**
+       * 註冊事件監聽器
+       * @param {string} event - 事件名稱 ('devicechange', 'micchange', 'outputchange')
+       * @param {function} callback - 回調函數
+       */
+      on(event, callback) {
+        if (!this._eventListeners[event]) {
+          console.warn(`Unknown event: ${event}`);
+          return;
+        }
+        this._eventListeners[event].push(callback);
+      }
+
+      /**
+       * 移除事件監聽器
+       * @param {string} event - 事件名稱
+       * @param {function} callback - 回調函數
+       */
+      off(event, callback) {
+        if (!this._eventListeners[event]) {
+          return;
+        }
+        const index = this._eventListeners[event].indexOf(callback);
+        if (index > -1) {
+          this._eventListeners[event].splice(index, 1);
+        }
+      }
+
+      /**
+       * 觸發事件
+       * @private
+       */
+      _emit(event, data) {
+        if (!this._eventListeners[event]) {
+          return;
+        }
+        this._eventListeners[event].forEach(callback => {
+          try {
+            callback(data);
+          } catch (error) {
+            console.error(`Error in ${event} event handler:`, error);
+          }
+        });
+      }
+
+      /**
+       * 銷毀 DeviceManager，清理資源
+       */
+      destroy() {
+        this.stopDeviceChangeMonitoring();
+        this._eventListeners = {
+          'devicechange': [],
+          'micchange': [],
+          'outputchange': []
+        };
+        this.microphoneDevices = [];
+        this.outputDevices = [];
+      }
+    }
+
+    /**
      * AudioEngine - 跨平台音訊錄音引擎
      * 
      * 功能：
@@ -26,6 +443,7 @@
      * - 提供錄音控制 (開始/停止/暫停/繼續)
      * - 事件驅動架構 (recording-start, data-available, recording-stop 等)
      * - 麥克風輸入管理與前級增益控制
+     * - 整合裝置管理 (DeviceManager)
      * 
      * @example
      * const engine = new AudioEngine({
@@ -56,6 +474,8 @@
        * @param {string} [options.deviceId] - 麥克風設備 ID
        * @param {string} [options.workletPath='assets/js/worklet/pcm-collector.js'] - AudioWorklet 模組路徑
        * @param {boolean} [options.preferWorklet=true] - 優先使用 AudioWorklet（支援時）
+       * @param {DeviceManager} [options.deviceManager] - 外部提供的 DeviceManager 實例（可選）
+       * @param {boolean} [options.autoManageDevices=true] - 是否自動創建和管理 DeviceManager
        */
       constructor(options = {}) {
         // 配置選項
@@ -67,8 +487,21 @@
           micGain: options.micGain || 1.0,
           deviceId: options.deviceId || null,
           workletPath: options.workletPath || 'assets/js/worklet/pcm-collector.js',
-          preferWorklet: options.preferWorklet !== undefined ? options.preferWorklet : true
+          preferWorklet: options.preferWorklet !== undefined ? options.preferWorklet : true,
+          autoManageDevices: options.autoManageDevices !== undefined ? options.autoManageDevices : true
         };
+
+        // 裝置管理器
+        if (options.deviceManager) {
+          this.deviceManager = options.deviceManager;
+          this._ownDeviceManager = false;
+        } else if (this.config.autoManageDevices) {
+          this.deviceManager = new DeviceManager();
+          this._ownDeviceManager = true;
+        } else {
+          this.deviceManager = null;
+          this._ownDeviceManager = false;
+        }
 
         // Web Audio API 物件
         this.audioContext = null;
@@ -209,7 +642,10 @@
             await this.audioContext.resume();
           }
 
-          // 獲取麥克風
+          // 停止舊的麥克風串流（如果存在）
+          this._stopMicrophone();
+
+          // 獲取麥克風（會使用 DeviceManager 選擇的裝置）
           await this._captureMicrophone();
 
           // 重置 PCM 數據收集
@@ -508,20 +944,38 @@
       // ============================================================
 
       async _captureMicrophone() {
-        const constraints = {
-          audio: {
+        let constraints;
+
+        // 如果有 DeviceManager，使用它來建立約束條件
+        if (this.deviceManager) {
+          constraints = this.deviceManager.getMicrophoneConstraints({
             echoCancellation: this.config.echoCancellation,
             noiseSuppression: this.config.noiseSuppression,
             autoGainControl: this.config.autoGainControl
-          },
-          video: false
-        };
+          });
 
-        // 加入設備 ID 限制（如果有指定）
-        if (this.config.deviceId) {
-          constraints.audio.deviceId = {
-            exact: this.config.deviceId
+          // 記錄選擇的裝置
+          const selectedId = this.deviceManager.getSelectedMicrophoneId();
+          console.log('[AudioEngine] 使用 DeviceManager 選擇的麥克風:', selectedId);
+          console.log('[AudioEngine] 約束條件:', JSON.stringify(constraints, null, 2));
+        } else {
+          // 傳統模式：手動建立約束條件
+          constraints = {
+            audio: {
+              echoCancellation: this.config.echoCancellation,
+              noiseSuppression: this.config.noiseSuppression,
+              autoGainControl: this.config.autoGainControl
+            },
+            video: false
           };
+
+          // 加入設備 ID 限制（如果有指定）
+          if (this.config.deviceId) {
+            constraints.audio.deviceId = {
+              exact: this.config.deviceId
+            };
+          }
+          console.log('[AudioEngine] 使用傳統模式，約束條件:', JSON.stringify(constraints, null, 2));
         }
         try {
           this.micStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -532,8 +986,16 @@
           // 連接麥克風到前級增益節點
           const source = this.audioContext.createMediaStreamSource(this.micStream);
           source.connect(this.preGainNode);
+          const usedDeviceId = this.deviceManager ? this.deviceManager.getSelectedMicrophoneId() : this.config.deviceId;
+
+          // 取得實際使用的裝置資訊
+          const audioTracks = this.micStream.getAudioTracks();
+          if (audioTracks.length > 0) {
+            const actualDevice = audioTracks[0].label;
+            console.log('[AudioEngine] 實際使用的麥克風:', actualDevice);
+          }
           this._emit('microphone-captured', {
-            deviceId: this.config.deviceId,
+            deviceId: usedDeviceId,
             constraints
           });
         } catch (error) {
@@ -801,6 +1263,51 @@
         for (let i = 0; i < string.length; i++) {
           view.setUint8(offset + i, string.charCodeAt(i));
         }
+      }
+
+      /**
+       * 銷毀 AudioEngine，釋放所有資源
+       */
+      destroy() {
+        // 停止錄音（如果正在錄音）
+        if (this.isRecording) {
+          this.stopRecording().catch(err => {
+            console.warn('停止錄音失敗:', err);
+          });
+        }
+
+        // 停止麥克風
+        this._stopMicrophone();
+
+        // 停止 PCM 採集
+        this._stopPcmCapture();
+
+        // 清理 AudioWorklet
+        if (this.pcmCollectorNode) {
+          this.pcmCollectorNode.disconnect();
+          this.pcmCollectorNode = null;
+        }
+
+        // 關閉 AudioContext
+        if (this.audioContext) {
+          this.audioContext.close().catch(err => {
+            console.warn('關閉 AudioContext 失敗:', err);
+          });
+          this.audioContext = null;
+        }
+
+        // 清理 DeviceManager（如果是自己創建的）
+        if (this._ownDeviceManager && this.deviceManager) {
+          this.deviceManager.destroy();
+          this.deviceManager = null;
+        }
+
+        // 清理事件監聽器
+        this._eventListeners = {};
+
+        // 重置狀態
+        this.isInitialized = false;
+        this.isRecording = false;
       }
     }
 
@@ -1669,17 +2176,28 @@
           console.log('📈 AccumulatedWaveform.append():', total, '樣本 →', Math.floor(total / factor), '區塊');
           this._lastAppendLog = now;
         }
+
+        // 改進的演算法：DC Offset Removal（移除直流偏移）
+        // 先計算區塊平均值，再以此為中心計算 min/max
+        // 這樣可以讓波形更對稱、細緻
         for (let i = 0; i < total; i += factor) {
-          let blockMin = 1.0;
-          let blockMax = -1;
           let blockSum = 0;
           let blockCount = 0;
+
+          // 第一階段：計算區塊平均值（DC offset）
           for (let j = 0; j < factor && i + j < total; j++) {
             const sample = audioSamples[i + j];
             blockSum += sample;
             blockCount++;
           }
-          const blockMean = blockCount ? blockSum / blockCount : 0;
+          if (!blockCount) {
+            continue;
+          }
+          const blockMean = blockSum / blockCount;
+
+          // 第二階段：以區塊平均值為中心，計算去中心化的 min/max
+          let blockMin = 1.0;
+          let blockMax = -1;
           for (let k = 0; k < blockCount; k++) {
             const centeredSample = audioSamples[i + k] - blockMean;
             if (centeredSample < blockMin) {
@@ -1689,9 +2207,8 @@
               blockMax = centeredSample;
             }
           }
-          if (!blockCount) {
-            continue;
-          }
+
+          // 防呆：確保 min <= max
           if (blockMin > blockMax) {
             blockMin = blockMax = 0;
           }
@@ -4312,6 +4829,7 @@
     exports.AudioEngine = AudioEngine;
     exports.BUILD_INFO = BUILD_INFO;
     exports.CapacitorAdapter = CapacitorAdapter;
+    exports.DeviceManager = DeviceManager;
     exports.ElectronAdapter = ElectronAdapter;
     exports.IndexedDBAdapter = IndexedDBAdapter;
     exports.PlatformDetector = PlatformDetector;

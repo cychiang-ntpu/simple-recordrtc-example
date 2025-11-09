@@ -403,6 +403,29 @@
       <details style="margin: 20px 0; padding: 15px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
         <summary style="cursor: pointer; font-weight: 600; color: #667eea; padding: 5px;">⚙️ 進階設定</summary>
         <div style="margin-top: 15px; display: grid; gap: 15px;">
+          <!-- 裝置選擇 -->
+          <div>
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">🎤 輸入裝置（麥克風）</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <select id="mic-select" style="flex: 1; padding: 8px; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 14px;" disabled>
+                <option>讀取裝置中...</option>
+              </select>
+              <button id="btn-refresh-mics" style="padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;" title="重新整理麥克風清單">🔄</button>
+            </div>
+            <small id="mic-hint" style="color: #666; display: block; margin-top: 5px;">選擇要使用的麥克風裝置</small>
+          </div>
+          
+          <div>
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">🔊 輸出裝置（揚聲器）</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <select id="spk-select" style="flex: 1; padding: 8px; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 14px;" disabled>
+                <option value="default">系統預設輸出</option>
+              </select>
+              <button id="btn-refresh-outputs" style="padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;" title="重新整理輸出裝置清單">🔄</button>
+            </div>
+            <small id="spk-hint" style="color: #666; display: block; margin-top: 5px;">部分瀏覽器需 HTTPS 才可切換輸出裝置</small>
+          </div>
+          
           <!-- 麥克風增益 -->
           <div>
             <label style="display: block; margin-bottom: 5px; font-weight: 500;">前級增益 (Mic Gain)</label>
@@ -689,6 +712,10 @@
       btnRecord.addEventListener('click', async () => {
         try {
           log('🎙️ 開始錄音...', 'info');
+          
+          // DeviceManager 已經整合到 AudioEngine 中，會自動使用選擇的麥克風
+          // 不需要手動設置 deviceId
+          
           await audioEngine.startRecording();
           btnRecord.disabled = true;
           btnStop.disabled = false;
@@ -730,9 +757,22 @@
           document.getElementById('info-filesize').textContent = (blob.size / 1024).toFixed(2);
           recordingInfo.style.display = 'block';
           
-          // 保存 blob 以便播放
+          // 清理舊的音訊資源
+          if (audioPlayer) {
+            audioPlayer.pause();
+            audioPlayer.src = '';
+            audioPlayer = null;
+            log('🗑️ 已清理舊的播放器', 'info');
+          }
+          if (window.recordedUrl) {
+            URL.revokeObjectURL(window.recordedUrl);
+            log('🗑️ 已釋放舊的音訊 URL', 'info');
+          }
+          
+          // 保存新的 blob 以便播放
           window.recordedBlob = blob;
           window.recordedUrl = URL.createObjectURL(blob);
+          log('💾 新的錄音已準備播放', 'success');
         } catch (error) {
           log(`❌ 停止失敗: ${error.message}`, 'error');
           console.error('Stop Error:', error);
@@ -742,7 +782,7 @@
       // 播放錄音
       let audioPlayer = null;
       
-      btnPlay.addEventListener('click', () => {
+      btnPlay.addEventListener('click', async () => {
         try {
           if (!window.recordedUrl) {
             log('❌ 沒有可播放的錄音', 'error');
@@ -751,14 +791,33 @@
           
           log('▶️ 播放錄音...', 'info');
           
-          // 創建音訊播放器
-          if (!audioPlayer) {
-            audioPlayer = new Audio(window.recordedUrl);
-            audioPlayer.addEventListener('ended', () => {
-              btnPlay.disabled = false;
-              btnPause.disabled = true;
-              log('✓ 播放完成', 'info');
-            });
+          // 每次播放都重新創建音訊播放器，確保使用最新的錄音
+          if (audioPlayer) {
+            audioPlayer.pause();
+            audioPlayer.src = '';
+            audioPlayer = null;
+          }
+          
+          audioPlayer = new Audio(window.recordedUrl);
+          
+          // 設置事件監聽器
+          audioPlayer.addEventListener('ended', () => {
+            btnPlay.disabled = false;
+            btnPause.disabled = true;
+            log('✓ 播放完成', 'info');
+          });
+          
+          // 使用 DeviceManager 設置輸出裝置
+          if (deviceManager) {
+            try {
+              await deviceManager.setAudioOutputDevice(audioPlayer);
+              const selectedOutput = deviceManager.getSelectedOutputDevice();
+              const outputName = selectedOutput ? selectedOutput.label : '系統預設';
+              log(`🔊 使用輸出裝置: ${outputName}`, 'info');
+            } catch (err) {
+              console.warn('設置輸出裝置失敗:', err);
+              log('⚠️ 設置輸出裝置失敗，使用預設輸出', 'warning');
+            }
           }
           
           audioPlayer.play();
@@ -823,6 +882,225 @@
         }
       });
     }
+    
+    // ============================================================
+    // 裝置管理（使用 DeviceManager API）
+    // ============================================================
+    
+    // 使用 AudioEngine 內建的 DeviceManager
+    let deviceManager = null;
+    
+    // 列舉麥克風裝置
+    async function populateMicDevices() {
+      if (!deviceManager) return;
+      
+      const micSelect = document.getElementById('mic-select');
+      const micHint = document.getElementById('mic-hint');
+      
+      if (!deviceManager.isSupported()) {
+        micSelect.innerHTML = '<option>此瀏覽器不支援裝置列舉</option>';
+        micSelect.disabled = true;
+        micHint.textContent = '您的瀏覽器不支援列舉裝置';
+        return;
+      }
+      
+      try {
+        // 使用 DeviceManager 列舉麥克風
+        const microphones = await deviceManager.enumerateMicrophones();
+        
+        micSelect.innerHTML = '';
+        
+        if (microphones.length === 0) {
+          micSelect.innerHTML = '<option>未偵測到麥克風</option>';
+          micSelect.disabled = true;
+          micHint.textContent = '請確認麥克風已連接並授予權限';
+          return;
+        }
+        
+        micSelect.disabled = false;
+        
+        microphones.forEach((device, index) => {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.textContent = device.label || `麥克風 ${index + 1}`;
+          micSelect.appendChild(option);
+        });
+        
+        // 恢復上次選擇
+        const savedId = deviceManager.getSelectedMicrophoneId();
+        log(`💾 從 localStorage 讀取的麥克風 ID: ${savedId || '(無)'}`, 'info');
+        
+        if (savedId && deviceManager.isDeviceAvailable(savedId, 'microphone')) {
+          // 上次的裝置仍然可用
+          micSelect.value = savedId;
+          const deviceLabel = micSelect.options[micSelect.selectedIndex].text;
+          log(`✅ 恢復上次選擇的麥克風: ${deviceLabel} (${savedId})`, 'success');
+        } else {
+          // 上次的裝置不可用或沒有儲存的選擇
+          if (savedId) {
+            log(`⚠️ 上次選擇的麥克風 ${savedId} 已不可用`, 'warning');
+          }
+          
+          if (microphones.length > 0) {
+            // 選擇第一個可用的麥克風，並更新 DeviceManager
+            const firstDeviceId = microphones[0].deviceId;
+            deviceManager.selectMicrophone(firstDeviceId, true); // 儲存到 localStorage
+            micSelect.value = firstDeviceId;
+            log(`🎤 選擇預設麥克風: ${microphones[0].label} (${firstDeviceId})`, 'info');
+          }
+        }
+        
+        micHint.textContent = `找到 ${microphones.length} 個麥克風裝置`;
+        log(`📊 已列舉 ${microphones.length} 個麥克風裝置`, 'info');
+      } catch (error) {
+        console.error('列舉麥克風失敗:', error);
+        micSelect.innerHTML = '<option>需要麥克風權限</option>';
+        micSelect.disabled = true;
+        micHint.textContent = '請授予麥克風權限後重新整理';
+        log('❌ 列舉麥克風失敗: ' + error.message, 'error');
+      }
+    }
+    
+    // 列舉輸出裝置
+    async function populateOutputDevices() {
+      if (!deviceManager) return;
+      
+      const spkSelect = document.getElementById('spk-select');
+      const spkHint = document.getElementById('spk-hint');
+      
+      if (!deviceManager.isSupported()) {
+        spkSelect.innerHTML = '<option value="default">系統預設輸出</option>';
+        spkSelect.disabled = true;
+        spkHint.textContent = '此瀏覽器不支援輸出裝置切換';
+        return;
+      }
+      
+      try {
+        // 使用 DeviceManager 列舉輸出裝置
+        const outputs = await deviceManager.enumerateOutputDevices();
+        
+        spkSelect.innerHTML = '<option value="default">系統預設輸出</option>';
+        
+        if (outputs.length === 0) {
+          spkSelect.disabled = true;
+          spkHint.textContent = '未偵測到輸出裝置或瀏覽器不支援';
+          return;
+        }
+        
+        spkSelect.disabled = false;
+        
+        outputs.forEach((device, index) => {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.textContent = device.label || `揚聲器 ${index + 1}`;
+          spkSelect.appendChild(option);
+        });
+        
+        // 恢復上次選擇
+        const selectedId = deviceManager.getSelectedOutputDeviceId();
+        if (selectedId) {
+          spkSelect.value = selectedId;
+        }
+        
+        spkHint.textContent = `找到 ${outputs.length} 個輸出裝置`;
+        log(`🔊 已列舉 ${outputs.length} 個輸出裝置`, 'info');
+      } catch (error) {
+        console.error('列舉輸出裝置失敗:', error);
+        spkHint.textContent = '列舉輸出裝置失敗';
+        log('❌ 列舉輸出裝置失敗: ' + error.message, 'error');
+      }
+    }
+    
+    // 設置裝置選擇事件監聽器
+    function setupDeviceListeners() {
+      if (!deviceManager) return;
+      
+      const micSelect = document.getElementById('mic-select');
+      const spkSelect = document.getElementById('spk-select');
+      const btnRefreshMics = document.getElementById('btn-refresh-mics');
+      const btnRefreshOutputs = document.getElementById('btn-refresh-outputs');
+      
+      // 麥克風選擇變更
+      if (micSelect) {
+        micSelect.addEventListener('change', (e) => {
+          const deviceId = e.target.value;
+          const deviceLabel = e.target.options[e.target.selectedIndex].text;
+          
+          deviceManager.selectMicrophone(deviceId);
+          
+          log(`🎤 已選擇麥克風: ${deviceLabel}`, 'info');
+          log(`📍 裝置 ID: ${deviceId}`, 'info');
+          log('⚠️ 請重新啟動錄音以套用新的麥克風設定', 'warning');
+          
+          // 驗證選擇是否成功
+          const selectedId = deviceManager.getSelectedMicrophoneId();
+          if (selectedId === deviceId) {
+            log(`✓ DeviceManager 已確認選擇: ${selectedId}`, 'info');
+          } else {
+            log(`❌ DeviceManager 選擇失敗！預期: ${deviceId}, 實際: ${selectedId}`, 'error');
+          }
+        });
+      }
+      
+      // 輸出裝置選擇變更
+      if (spkSelect) {
+        spkSelect.addEventListener('change', (e) => {
+          deviceManager.selectOutputDevice(e.target.value);
+          log(`🔊 已設定輸出裝置: ${e.target.value === 'default' ? '系統預設' : e.target.options[e.target.selectedIndex].text}`, 'info');
+        });
+      }
+      
+      // 重新整理麥克風清單
+      if (btnRefreshMics) {
+        btnRefreshMics.addEventListener('click', () => {
+          log('🔄 重新整理麥克風清單...', 'info');
+          populateMicDevices();
+        });
+      }
+      
+      // 重新整理輸出裝置清單
+      if (btnRefreshOutputs) {
+        btnRefreshOutputs.addEventListener('click', () => {
+          log('🔄 重新整理輸出裝置清單...', 'info');
+          populateOutputDevices();
+        });
+      }
+      
+      // 監聽裝置變更事件（使用 DeviceManager 的事件系統）
+      deviceManager.on('devicechange', ({ microphones, outputs }) => {
+        log('🔌 偵測到裝置變更，自動更新清單', 'info');
+        populateMicDevices();
+        populateOutputDevices();
+      });
+      
+      // 啟動裝置變更監聽
+      deviceManager.startDeviceChangeMonitoring();
+    }
+    
+    // 在初始化完成後列舉裝置
+    async function initializeDevices() {
+      if (!audioEngine || !audioEngine.deviceManager) {
+        log('❌ DeviceManager 尚未初始化', 'error');
+        return;
+      }
+      
+      // 取得 AudioEngine 內建的 DeviceManager
+      deviceManager = audioEngine.deviceManager;
+      
+      log('🔍 正在列舉音訊裝置...', 'info');
+      await populateMicDevices();
+      await populateOutputDevices();
+      setupDeviceListeners();
+    }
+    
+    // 修改 initRecorder 函數，在初始化完成後列舉裝置
+    const originalInitRecorder = initRecorder;
+    initRecorder = async function() {
+      await originalInitRecorder();
+      if (isInitialized) {
+        await initializeDevices();
+      }
+    };
     
     // 格式化時間為 MM:SS.mmm
     function formatDuration(seconds) {

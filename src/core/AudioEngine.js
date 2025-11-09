@@ -1,3 +1,5 @@
+import DeviceManager from './DeviceManager.js';
+
 /**
  * AudioEngine - 跨平台音訊錄音引擎
  * 
@@ -8,6 +10,7 @@
  * - 提供錄音控制 (開始/停止/暫停/繼續)
  * - 事件驅動架構 (recording-start, data-available, recording-stop 等)
  * - 麥克風輸入管理與前級增益控制
+ * - 整合裝置管理 (DeviceManager)
  * 
  * @example
  * const engine = new AudioEngine({
@@ -38,6 +41,8 @@ export class AudioEngine {
      * @param {string} [options.deviceId] - 麥克風設備 ID
      * @param {string} [options.workletPath='assets/js/worklet/pcm-collector.js'] - AudioWorklet 模組路徑
      * @param {boolean} [options.preferWorklet=true] - 優先使用 AudioWorklet（支援時）
+     * @param {DeviceManager} [options.deviceManager] - 外部提供的 DeviceManager 實例（可選）
+     * @param {boolean} [options.autoManageDevices=true] - 是否自動創建和管理 DeviceManager
      */
     constructor(options = {}) {
         // 配置選項
@@ -49,8 +54,21 @@ export class AudioEngine {
             micGain: options.micGain || 1.0,
             deviceId: options.deviceId || null,
             workletPath: options.workletPath || 'assets/js/worklet/pcm-collector.js',
-            preferWorklet: options.preferWorklet !== undefined ? options.preferWorklet : true
+            preferWorklet: options.preferWorklet !== undefined ? options.preferWorklet : true,
+            autoManageDevices: options.autoManageDevices !== undefined ? options.autoManageDevices : true
         };
+        
+        // 裝置管理器
+        if (options.deviceManager) {
+            this.deviceManager = options.deviceManager;
+            this._ownDeviceManager = false;
+        } else if (this.config.autoManageDevices) {
+            this.deviceManager = new DeviceManager();
+            this._ownDeviceManager = true;
+        } else {
+            this.deviceManager = null;
+            this._ownDeviceManager = false;
+        }
 
         // Web Audio API 物件
         this.audioContext = null;
@@ -190,7 +208,10 @@ export class AudioEngine {
                 await this.audioContext.resume();
             }
 
-            // 獲取麥克風
+            // 停止舊的麥克風串流（如果存在）
+            this._stopMicrophone();
+
+            // 獲取麥克風（會使用 DeviceManager 選擇的裝置）
             await this._captureMicrophone();
 
             // 重置 PCM 數據收集
@@ -511,18 +532,37 @@ export class AudioEngine {
     // ============================================================
 
     async _captureMicrophone() {
-        const constraints = {
-            audio: {
+        let constraints;
+        
+        // 如果有 DeviceManager，使用它來建立約束條件
+        if (this.deviceManager) {
+            constraints = this.deviceManager.getMicrophoneConstraints({
                 echoCancellation: this.config.echoCancellation,
                 noiseSuppression: this.config.noiseSuppression,
                 autoGainControl: this.config.autoGainControl
-            },
-            video: false
-        };
+            });
+            
+            // 記錄選擇的裝置
+            const selectedId = this.deviceManager.getSelectedMicrophoneId();
+            console.log('[AudioEngine] 使用 DeviceManager 選擇的麥克風:', selectedId);
+            console.log('[AudioEngine] 約束條件:', JSON.stringify(constraints, null, 2));
+        } else {
+            // 傳統模式：手動建立約束條件
+            constraints = {
+                audio: {
+                    echoCancellation: this.config.echoCancellation,
+                    noiseSuppression: this.config.noiseSuppression,
+                    autoGainControl: this.config.autoGainControl
+                },
+                video: false
+            };
 
-        // 加入設備 ID 限制（如果有指定）
-        if (this.config.deviceId) {
-            constraints.audio.deviceId = { exact: this.config.deviceId };
+            // 加入設備 ID 限制（如果有指定）
+            if (this.config.deviceId) {
+                constraints.audio.deviceId = { exact: this.config.deviceId };
+            }
+            
+            console.log('[AudioEngine] 使用傳統模式，約束條件:', JSON.stringify(constraints, null, 2));
         }
 
         try {
@@ -535,8 +575,19 @@ export class AudioEngine {
             const source = this.audioContext.createMediaStreamSource(this.micStream);
             source.connect(this.preGainNode);
 
+            const usedDeviceId = this.deviceManager ? 
+                this.deviceManager.getSelectedMicrophoneId() : 
+                this.config.deviceId;
+            
+            // 取得實際使用的裝置資訊
+            const audioTracks = this.micStream.getAudioTracks();
+            if (audioTracks.length > 0) {
+                const actualDevice = audioTracks[0].label;
+                console.log('[AudioEngine] 實際使用的麥克風:', actualDevice);
+            }
+
             this._emit('microphone-captured', {
-                deviceId: this.config.deviceId,
+                deviceId: usedDeviceId,
                 constraints
             });
 
@@ -832,6 +883,51 @@ export class AudioEngine {
         for (let i = 0; i < string.length; i++) {
             view.setUint8(offset + i, string.charCodeAt(i));
         }
+    }
+    
+    /**
+     * 銷毀 AudioEngine，釋放所有資源
+     */
+    destroy() {
+        // 停止錄音（如果正在錄音）
+        if (this.isRecording) {
+            this.stopRecording().catch(err => {
+                console.warn('停止錄音失敗:', err);
+            });
+        }
+        
+        // 停止麥克風
+        this._stopMicrophone();
+        
+        // 停止 PCM 採集
+        this._stopPcmCapture();
+        
+        // 清理 AudioWorklet
+        if (this.pcmCollectorNode) {
+            this.pcmCollectorNode.disconnect();
+            this.pcmCollectorNode = null;
+        }
+        
+        // 關閉 AudioContext
+        if (this.audioContext) {
+            this.audioContext.close().catch(err => {
+                console.warn('關閉 AudioContext 失敗:', err);
+            });
+            this.audioContext = null;
+        }
+        
+        // 清理 DeviceManager（如果是自己創建的）
+        if (this._ownDeviceManager && this.deviceManager) {
+            this.deviceManager.destroy();
+            this.deviceManager = null;
+        }
+        
+        // 清理事件監聽器
+        this._eventListeners = {};
+        
+        // 重置狀態
+        this.isInitialized = false;
+        this.isRecording = false;
     }
 }
 

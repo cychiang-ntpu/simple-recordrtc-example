@@ -922,19 +922,29 @@ export class AccumulatedWaveform {
             this._lastAppendLog = now;
         }
         
+        // 改進的演算法：DC Offset Removal（移除直流偏移）
+        // 先計算區塊平均值，再以此為中心計算 min/max
+        // 這樣可以讓波形更對稱、細緻
         for (let i = 0; i < total; i += factor) {
-            let blockMin = 1.0;
-            let blockMax = -1.0;
             let blockSum = 0;
             let blockCount = 0;
 
+            // 第一階段：計算區塊平均值（DC offset）
             for (let j = 0; j < factor && (i + j) < total; j++) {
                 const sample = audioSamples[i + j];
                 blockSum += sample;
                 blockCount++;
             }
 
-            const blockMean = blockCount ? (blockSum / blockCount) : 0;
+            if (!blockCount) {
+                continue;
+            }
+
+            const blockMean = blockSum / blockCount;
+
+            // 第二階段：以區塊平均值為中心，計算去中心化的 min/max
+            let blockMin = 1.0;
+            let blockMax = -1.0;
 
             for (let k = 0; k < blockCount; k++) {
                 const centeredSample = audioSamples[i + k] - blockMean;
@@ -946,10 +956,7 @@ export class AccumulatedWaveform {
                 }
             }
 
-            if (!blockCount) {
-                continue;
-            }
-
+            // 防呆：確保 min <= max
             if (blockMin > blockMax) {
                 blockMin = blockMax = 0;
             }
