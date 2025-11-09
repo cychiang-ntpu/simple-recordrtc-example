@@ -210,6 +210,64 @@ export class IndexedDBAdapter extends StorageAdapter {
   }
   
   /**
+   * 清空所有錄音
+   * @returns {Promise<number>} 刪除的數量
+   */
+  async clear() {
+    await this.initialize();
+    
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction([this.storeName], 'readwrite');
+      const store = transaction.objectStore(this.storeName);
+      
+      // 先取得數量
+      const countRequest = store.count();
+      
+      countRequest.onsuccess = () => {
+        const count = countRequest.result;
+        
+        // 清空儲存區
+        const clearRequest = store.clear();
+        
+        clearRequest.onsuccess = () => {
+          resolve(count);
+        };
+        
+        clearRequest.onerror = () => {
+          reject(new Error(`Failed to clear recordings: ${clearRequest.error}`));
+        };
+      };
+      
+      countRequest.onerror = () => {
+        reject(new Error(`Failed to count recordings: ${countRequest.error}`));
+      };
+    });
+  }
+  
+  /**
+   * 取得瀏覽器儲存空間配額資訊（如果可用）
+   * @returns {Promise<Object|null>}
+   */
+  async getStorageEstimate() {
+    if ('storage' in navigator && 'estimate' in navigator.storage) {
+      try {
+        const estimate = await navigator.storage.estimate();
+        return {
+          usage: estimate.usage,
+          quota: estimate.quota,
+          usageMB: (estimate.usage / (1024 * 1024)).toFixed(2),
+          quotaMB: (estimate.quota / (1024 * 1024)).toFixed(2),
+          usagePercent: ((estimate.usage / estimate.quota) * 100).toFixed(2)
+        };
+      } catch (error) {
+        console.warn('Failed to get storage estimate:', error);
+        return null;
+      }
+    }
+    return null;
+  }
+  
+  /**
    * 關閉資料庫連接
    */
   close() {
