@@ -7,6 +7,9 @@
  * @license MIT
  */
 
+// 匯出核心模組
+export { AudioEngine } from './core/AudioEngine.js';
+
 // 匯出儲存模組
 export {
   StorageAdapter,

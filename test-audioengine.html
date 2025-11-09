@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioEngine 測試</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        
+        h2 {
+            color: #555;
+            font-size: 1.2em;
+            margin-top: 0;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background: #5568d3;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        button.recording {
+            background: #f44336;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .info {
+            background: #e3f2fd;
+            border-left: 4px solid #2196F3;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        
+        .success {
+            background: #e8f5e9;
+            border-left: 4px solid #4CAF50;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        
+        .error {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .log-area {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        
+        .log-entry {
+            padding: 3px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        
+        .log-time {
+            color: #999;
+        }
+        
+        .log-event {
+            color: #2196F3;
+            font-weight: bold;
+        }
+        
+        .log-error {
+            color: #f44336;
+        }
+        
+        canvas {
+            width: 100%;
+            height: 100px;
+            background: #000;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 10px 0;
+        }
+        
+        .stat-item {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .stat-value {
+            font-size: 18px;
+            color: #333;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🎙️ AudioEngine 測試</h1>
+        <div class="info">
+            <strong>測試模組：</strong> src/core/AudioEngine.js<br>
+            <strong>功能：</strong> 錄音控制、AudioWorklet、RecordRTC、事件系統
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>📊 引擎狀態</h2>
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-label">初始化狀態</div>
+                <div class="stat-value" id="stat-initialized">未初始化</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">錄音狀態</div>
+                <div class="stat-value" id="stat-recording">待命</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">錄音模式</div>
+                <div class="stat-value" id="stat-mode">-</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">採樣率</div>
+                <div class="stat-value" id="stat-samplerate">-</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">樣本數</div>
+                <div class="stat-value" id="stat-samples">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">錄音時長</div>
+                <div class="stat-value" id="stat-duration">0.0s</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>🎛️ 控制面板</h2>
+        
+        <h3 style="color: #666; font-size: 1em; margin: 15px 0 10px 0;">步驟 1：選擇麥克風</h3>
+        <div class="controls">
+            <label style="display: flex; align-items: center; gap: 10px;">
+                <span style="min-width: 100px;">麥克風裝置:</span>
+                <select id="mic-select" style="min-width: 250px; flex: 1;">
+                    <option value="">正在偵測裝置...</option>
+                </select>
+            </label>
+        </div>
+        
+        <h3 style="color: #666; font-size: 1em; margin: 15px 0 10px 0;">步驟 2：配置參數</h3>
+        <div class="controls">
+            <label>
+                麥克風增益:
+                <input type="range" id="mic-gain" min="1" max="6" step="0.1" value="1.0">
+                <span id="mic-gain-value">1.0x</span>
+            </label>
+            <label>
+                <input type="checkbox" id="prefer-worklet" checked>
+                優先使用 AudioWorklet
+            </label>
+            <label>
+                <input type="checkbox" id="auto-gain">
+                自動增益控制 (AGC)
+            </label>
+        </div>
+        
+        <h3 style="color: #666; font-size: 1em; margin: 15px 0 10px 0;">步驟 3：初始化與錄音</h3>
+        <div class="controls">
+            <button id="btn-init">初始化引擎</button>
+            <button id="btn-start" disabled>開始錄音</button>
+            <button id="btn-stop" disabled>停止錄音</button>
+        </div>
+        
+        <h3 style="color: #666; font-size: 1em; margin: 15px 0 10px 0;">步驟 4：播放與管理</h3>
+        <div class="controls">
+            <button id="btn-play" disabled>播放錄音</button>
+            <button id="btn-download" disabled>下載 WAV</button>
+            <button id="btn-clear-log">清除日誌</button>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>📈 即時波形</h2>
+        <canvas id="waveform" width="800" height="100"></canvas>
+    </div>
+    
+    <div class="card">
+        <h2>📝 事件日誌</h2>
+        <div id="log-area" class="log-area"></div>
+    </div>
+    
+    <div class="card">
+        <h2>📚 AudioEngine 使用範例</h2>
+        <div style="margin-bottom: 15px;">
+            <button id="btn-example-basic" style="background: #4CAF50;">範例 1: 基本錄音</button>
+            <button id="btn-example-events" style="background: #FF9800;">範例 2: 事件監聽</button>
+            <button id="btn-example-pcm" style="background: #9C27B0;">範例 3: 訪問 PCM 數據</button>
+            <button id="btn-example-analyser" style="background: #00BCD4;">範例 4: 波形分析</button>
+        </div>
+        <pre id="example-code" style="background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 4px; overflow-x: auto; max-height: 400px;"></pre>
+    </div>
+    
+    <!-- 載入 RecordRTC -->
+    <script src="assets/js/RecordRTC.js"></script>
+    
+    <script type="module">
+        import { AudioEngine } from './src/core/AudioEngine.js';
+        
+        // 全域變數
+        let engine = null;
+        let animationId = null;
+        let startTime = 0;
+        
+        // DOM 元素
+        const btnInit = document.getElementById('btn-init');
+        const btnStart = document.getElementById('btn-start');
+        const btnStop = document.getElementById('btn-stop');
+        const btnPlay = document.getElementById('btn-play');
+        const btnDownload = document.getElementById('btn-download');
+        const btnClearLog = document.getElementById('btn-clear-log');
+        const micSelect = document.getElementById('mic-select');
+        const micGainSlider = document.getElementById('mic-gain');
+        const micGainValue = document.getElementById('mic-gain-value');
+        const preferWorkletCheck = document.getElementById('prefer-worklet');
+        const autoGainCheck = document.getElementById('auto-gain');
+        const logArea = document.getElementById('log-area');
+        const waveformCanvas = document.getElementById('waveform');
+        const waveformCtx = waveformCanvas.getContext('2d');
+        
+        // 列舉麥克風裝置
+        async function populateMicrophones() {
+            try {
+                // 先請求權限以獲取裝置標籤
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+                
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const microphones = devices.filter(d => d.kind === 'audioinput');
+                
+                micSelect.innerHTML = '';
+                
+                if (microphones.length === 0) {
+                    micSelect.innerHTML = '<option value="">未偵測到麥克風</option>';
+                    micSelect.disabled = true;
+                    addLog('未偵測到麥克風裝置', 'error');
+                    return;
+                }
+                
+                microphones.forEach((mic, idx) => {
+                    const option = document.createElement('option');
+                    option.value = mic.deviceId;
+                    option.textContent = mic.label || `Microphone ${idx + 1}`;
+                    micSelect.appendChild(option);
+                });
+                
+                micSelect.disabled = false;
+                addLog(`偵測到 ${microphones.length} 個麥克風裝置`, 'info');
+                
+                // 從 localStorage 恢復上次選擇
+                const savedDeviceId = localStorage.getItem('test-preferred-mic');
+                if (savedDeviceId) {
+                    micSelect.value = savedDeviceId;
+                    const selectedOption = micSelect.options[micSelect.selectedIndex];
+                    if (selectedOption) {
+                        addLog(`已自動選擇上次使用的麥克風: ${selectedOption.textContent}`, 'event');
+                    }
+                } else {
+                    // 選擇第一個麥克風
+                    const firstOption = micSelect.options[0];
+                    if (firstOption) {
+                        addLog(`已預設選擇: ${firstOption.textContent}`, 'event');
+                    }
+                }
+                
+            } catch (error) {
+                console.error('列舉麥克風失敗:', error);
+                micSelect.innerHTML = '<option value="">需要麥克風權限</option>';
+                micSelect.disabled = true;
+                addLog(`列舉麥克風失敗: ${error.message}`, 'error');
+            }
+        }
+        
+        // 麥克風切換事件
+        micSelect.addEventListener('change', (e) => {
+            const deviceId = e.target.value;
+            const selectedOption = micSelect.options[micSelect.selectedIndex];
+            const deviceName = selectedOption.textContent;
+            
+            localStorage.setItem('test-preferred-mic', deviceId);
+            
+            addLog(`已選擇麥克風: ${deviceName} (ID: ${deviceId.substring(0, 20)}...)`, 'event');
+            
+            if (engine && engine.isInitialized) {
+                addLog('💡 提示：麥克風已變更，請點擊「初始化引擎」以套用新設定', 'info');
+            } else {
+                addLog('✓ 現在可以點擊「初始化引擎」', 'info');
+            }
+        });
+        
+        // 初始化引擎
+        btnInit.addEventListener('click', async () => {
+            try {
+                addLog('正在初始化 AudioEngine...', 'info');
+                
+                // 如果已有引擎實例，先清理
+                if (engine) {
+                    engine.dispose();
+                    engine = null;
+                }
+                
+                engine = new AudioEngine({
+                    sampleRate: 48000,
+                    autoGainControl: autoGainCheck.checked,
+                    micGain: parseFloat(micGainSlider.value),
+                    preferWorklet: preferWorkletCheck.checked,
+                    deviceId: micSelect.value || null
+                });
+                
+                // 註冊所有事件監聽器
+                registerEventListeners();
+                
+                await engine.initialize();
+                
+                btnInit.disabled = true;
+                btnInit.textContent = '✓ 已初始化';
+                btnStart.disabled = false;
+                
+                updateStats();
+                
+            } catch (error) {
+                addLog(`初始化失敗: ${error.message}`, 'error');
+                console.error(error);
+            }
+        });
+        
+        // 開始錄音
+        btnStart.addEventListener('click', async () => {
+            try {
+                addLog('開始錄音...', 'info');
+                startTime = Date.now();
+                
+                await engine.startRecording();
+                
+                btnStart.disabled = true;
+                btnStart.classList.add('recording');
+                btnStop.disabled = false;
+                btnPlay.disabled = true;
+                btnDownload.disabled = true;
+                
+                // 開始繪製波形
+                startWaveformAnimation();
+                
+                // 更新時長顯示
+                updateDurationDisplay();
+                
+            } catch (error) {
+                addLog(`開始錄音失敗: ${error.message}`, 'error');
+                console.error(error);
+            }
+        });
+        
+        // 停止錄音
+        btnStop.addEventListener('click', async () => {
+            try {
+                addLog('停止錄音...', 'info');
+                
+                const blob = await engine.stopRecording();
+                
+                btnStart.disabled = false;
+                btnStart.classList.remove('recording');
+                btnStart.textContent = '開始錄音';
+                btnStop.disabled = true;
+                btnPlay.disabled = false;
+                btnDownload.disabled = false;
+                btnInit.disabled = false;
+                btnInit.textContent = '重新初始化';
+                
+                // 停止波形動畫
+                stopWaveformAnimation();
+                
+                addLog(`錄音完成 (${(blob.size / 1024).toFixed(2)} KB)`, 'success');
+                
+            } catch (error) {
+                addLog(`停止錄音失敗: ${error.message}`, 'error');
+                console.error(error);
+            }
+        });
+        
+        // 播放錄音
+        btnPlay.addEventListener('click', () => {
+            const recording = engine.getLatestRecording();
+            if (recording.url) {
+                const audio = new Audio(recording.url);
+                audio.play();
+                addLog('播放錄音', 'info');
+            }
+        });
+        
+        // 下載錄音
+        btnDownload.addEventListener('click', () => {
+            const recording = engine.getLatestRecording();
+            if (recording.url) {
+                const a = document.createElement('a');
+                a.href = recording.url;
+                a.download = `recording-${Date.now()}.wav`;
+                a.click();
+                addLog('下載錄音', 'info');
+            }
+        });
+        
+        // 清除日誌
+        btnClearLog.addEventListener('click', () => {
+            logArea.innerHTML = '';
+        });
+        
+        // 增益調整
+        micGainSlider.addEventListener('input', (e) => {
+            const gain = parseFloat(e.target.value);
+            micGainValue.textContent = gain.toFixed(1) + 'x';
+            
+            if (engine) {
+                engine.setMicGain(gain);
+            }
+        });
+        
+        // 註冊事件監聽器
+        function registerEventListeners() {
+            engine.on('initialized', (data) => {
+                addLog(`已初始化 (SR: ${data.sampleRate}Hz, Worklet: ${data.workletLoaded})`, 'event');
+                document.getElementById('stat-initialized').textContent = '已初始化';
+                document.getElementById('stat-samplerate').textContent = data.sampleRate + ' Hz';
+            });
+            
+            engine.on('recording-start', (data) => {
+                addLog(`錄音開始 (模式: ${data.mode})`, 'event');
+                document.getElementById('stat-recording').textContent = '錄音中';
+                document.getElementById('stat-mode').textContent = data.mode;
+            });
+            
+            engine.on('recording-stop', (data) => {
+                addLog(`錄音停止 (時長: ${data.duration.toFixed(2)}s, 樣本: ${data.samples})`, 'event');
+                document.getElementById('stat-recording').textContent = '已停止';
+                document.getElementById('stat-samples').textContent = data.samples.toLocaleString();
+                document.getElementById('stat-duration').textContent = data.duration.toFixed(2) + 's';
+            });
+            
+            engine.on('data-available', (data) => {
+                if (data.mode === 'worklet') {
+                    document.getElementById('stat-samples').textContent = 
+                        data.totalSamples.toLocaleString();
+                }
+            });
+            
+            engine.on('microphone-captured', () => {
+                addLog('麥克風已捕獲', 'event');
+            });
+            
+            engine.on('error', (data) => {
+                addLog(`錯誤 [${data.stage}]: ${data.error.message}`, 'error');
+            });
+            
+            engine.on('worklet-loaded', () => {
+                addLog('AudioWorklet 模組已載入', 'event');
+            });
+            
+            engine.on('worklet-load-failed', () => {
+                addLog('AudioWorklet 載入失敗，將使用 RecordRTC', 'event');
+            });
+            
+            engine.on('ios-gain-adjusted', (data) => {
+                addLog(`iOS 自動調整增益至 ${data.gain}x`, 'event');
+            });
+        }
+        
+        // 開始波形動畫
+        function startWaveformAnimation() {
+            const analyser = engine.getAnalyser();
+            if (!analyser) return;
+            
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            
+            function draw() {
+                animationId = requestAnimationFrame(draw);
+                
+                analyser.getByteTimeDomainData(dataArray);
+                
+                waveformCtx.fillStyle = '#000';
+                waveformCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+                
+                waveformCtx.lineWidth = 2;
+                waveformCtx.strokeStyle = '#00ff00';
+                waveformCtx.beginPath();
+                
+                const sliceWidth = waveformCanvas.width / bufferLength;
+                let x = 0;
+                
+                for (let i = 0; i < bufferLength; i++) {
+                    const v = dataArray[i] / 128.0;
+                    const y = v * waveformCanvas.height / 2;
+                    
+                    if (i === 0) {
+                        waveformCtx.moveTo(x, y);
+                    } else {
+                        waveformCtx.lineTo(x, y);
+                    }
+                    
+                    x += sliceWidth;
+                }
+                
+                waveformCtx.lineTo(waveformCanvas.width, waveformCanvas.height / 2);
+                waveformCtx.stroke();
+            }
+            
+            draw();
+        }
+        
+        // 停止波形動畫
+        function stopWaveformAnimation() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+            
+            // 清空畫布
+            waveformCtx.fillStyle = '#000';
+            waveformCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+        }
+        
+        // 更新時長顯示
+        function updateDurationDisplay() {
+            if (!engine || !engine.isRecording) return;
+            
+            const elapsed = (Date.now() - startTime) / 1000;
+            document.getElementById('stat-duration').textContent = elapsed.toFixed(1) + 's';
+            
+            setTimeout(updateDurationDisplay, 100);
+        }
+        
+        // 更新統計資訊
+        function updateStats() {
+            if (!engine) return;
+            
+            const recording = engine.getLatestRecording();
+            
+            document.getElementById('stat-samples').textContent = 
+                recording.samples.toLocaleString();
+            document.getElementById('stat-duration').textContent = 
+                recording.duration.toFixed(2) + 's';
+        }
+        
+        // 添加日誌
+        function addLog(message, type = 'info') {
+            const time = new Date().toLocaleTimeString('zh-TW', { 
+                hour12: false, 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit',
+                fractionalSecondDigits: 3
+            });
+            
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            let typeClass = '';
+            let typeLabel = 'INFO';
+            
+            if (type === 'event') {
+                typeClass = 'log-event';
+                typeLabel = 'EVENT';
+            } else if (type === 'error') {
+                typeClass = 'log-error';
+                typeLabel = 'ERROR';
+            }
+            
+            entry.innerHTML = `
+                <span class="log-time">[${time}]</span>
+                <span class="${typeClass}">[${typeLabel}]</span>
+                ${message}
+            `;
+            
+            logArea.appendChild(entry);
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+        
+        // 初始化日誌
+        addLog('AudioEngine 測試頁面已載入', 'info');
+        addLog('正在列舉麥克風裝置...', 'info');
+        
+        // 列舉麥克風裝置
+        populateMicrophones();
+        
+        // 監聽裝置變更
+        if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+            navigator.mediaDevices.addEventListener('devicechange', () => {
+                addLog('偵測到裝置變更，重新列舉...', 'info');
+                populateMicrophones();
+            });
+        }
+        
+        // ============================================================
+        // 範例程式碼展示
+        // ============================================================
+        
+        const exampleCodeEl = document.getElementById('example-code');
+        
+        // 範例 1: 基本錄音
+        document.getElementById('btn-example-basic').addEventListener('click', () => {
+            exampleCodeEl.textContent = `// 範例 1: 基本錄音流程
+import { AudioEngine } from './src/core/AudioEngine.js';
+
+// 創建引擎實例
+const engine = new AudioEngine({
+  sampleRate: 48000,
+  autoGainControl: false,
+  micGain: 1.0
+});
+
+// 初始化
+await engine.initialize();
+
+// 開始錄音
+await engine.startRecording();
+
+// ... 等待錄音 ...
+
+// 停止錄音並取得 Blob
+const blob = await engine.stopRecording();
+
+// 播放錄音
+const url = URL.createObjectURL(blob);
+const audio = new Audio(url);
+audio.play();
+
+// 下載錄音
+const a = document.createElement('a');
+a.href = url;
+a.download = 'recording.wav';
+a.click();
+
+// 清理資源
+engine.dispose();`;
+            addLog('顯示範例 1: 基本錄音', 'info');
+        });
+        
+        // 範例 2: 事件監聽
+        document.getElementById('btn-example-events').addEventListener('click', () => {
+            exampleCodeEl.textContent = `// 範例 2: 完整的事件監聽
+import { AudioEngine } from './src/core/AudioEngine.js';
+
+const engine = new AudioEngine({ sampleRate: 48000 });
+
+// 監聽初始化完成
+engine.on('initialized', (data) => {
+  console.log('引擎已初始化', data);
+  // data: { sampleRate, state, workletSupported, workletLoaded }
+});
+
+// 監聽錄音開始
+engine.on('recording-start', (data) => {
+  console.log('錄音已開始', data);
+  // data: { timestamp, mode, sampleRate }
+  updateUI('recording');
+});
+
+// 監聽實時數據（AudioWorklet 模式）
+engine.on('data-available', (data) => {
+  if (data.mode === 'worklet' && data.pcmData) {
+    // 實時處理 PCM 數據
+    const rms = calculateRMS(data.pcmData);
+    updateVUMeter(rms);
+  }
+  // RecordRTC 模式會傳遞 blob
+  if (data.mode === 'recordrtc' && data.blob) {
+    console.log('收到音訊片段', data.blob.size);
+  }
+});
+
+// 監聽錄音停止
+engine.on('recording-stop', (data) => {
+  console.log('錄音已停止', data);
+  // data: { blob, url, duration, samples, sampleRate }
+  displayRecording(data.blob);
+});
+
+// 監聽麥克風捕獲
+engine.on('microphone-captured', (data) => {
+  console.log('麥克風已啟動', data.deviceId);
+});
+
+// 監聽錯誤
+engine.on('error', (data) => {
+  console.error(\`錯誤 [\${data.stage}]:\`, data.error);
+  showErrorDialog(data.error.message);
+});
+
+// iOS 增益自動調整
+engine.on('ios-gain-adjusted', (data) => {
+  console.log('iOS 已自動調整增益至', data.gain);
+});
+
+// 初始化並開始
+await engine.initialize();
+await engine.startRecording();`;
+            addLog('顯示範例 2: 事件監聽', 'info');
+        });
+        
+        // 範例 3: 訪問 PCM 數據
+        document.getElementById('btn-example-pcm').addEventListener('click', () => {
+            exampleCodeEl.textContent = `// 範例 3: 訪問原始 PCM 數據（AudioWorklet 模式）
+import { AudioEngine } from './src/core/AudioEngine.js';
+
+const engine = new AudioEngine({
+  sampleRate: 48000,
+  preferWorklet: true  // 確保使用 AudioWorklet
+});
+
+await engine.initialize();
+
+// 收集 PCM 數據用於分析
+let allPcmData = [];
+
+engine.on('data-available', (data) => {
+  if (data.mode === 'worklet' && data.pcmData) {
+    // data.pcmData 是 Float32Array，值範圍 -1.0 ~ 1.0
+    allPcmData.push(data.pcmData);
+    
+    // 即時計算音量
+    const rms = calculateRMS(data.pcmData);
+    const db = 20 * Math.log10(rms);
+    console.log(\`RMS: \${rms.toFixed(4)}, dB: \${db.toFixed(2)}\`);
+    
+    // 檢測削波（clipping）
+    const hasClipping = detectClipping(data.pcmData);
+    if (hasClipping) {
+      console.warn('偵測到削波！建議降低增益');
+    }
+  }
+});
+
+await engine.startRecording();
+
+// ... 錄音 5 秒 ...
+await new Promise(resolve => setTimeout(resolve, 5000));
+
+await engine.stopRecording();
+
+// 分析完整錄音
+const totalSamples = allPcmData.reduce((sum, chunk) => sum + chunk.length, 0);
+console.log(\`總樣本數: \${totalSamples}\`);
+console.log(\`錄音時長: \${(totalSamples / 48000).toFixed(2)} 秒\`);
+
+// 取得特定區間的 PCM 數據
+const startSample = 48000;  // 1 秒後
+const count = 4800;         // 100ms 的數據
+const window = engine.getPcmWindow(startSample, count);
+console.log('區間數據:', window);
+
+// 輔助函數
+function calculateRMS(float32Array) {
+  let sum = 0;
+  for (let i = 0; i < float32Array.length; i++) {
+    sum += float32Array[i] * float32Array[i];
+  }
+  return Math.sqrt(sum / float32Array.length);
+}
+
+function detectClipping(float32Array, threshold = 0.99) {
+  for (let i = 0; i < float32Array.length; i++) {
+    if (Math.abs(float32Array[i]) >= threshold) {
+      return true;
+    }
+  }
+  return false;
+}`;
+            addLog('顯示範例 3: 訪問 PCM 數據', 'info');
+        });
+        
+        // 範例 4: 波形分析
+        document.getElementById('btn-example-analyser').addEventListener('click', () => {
+            exampleCodeEl.textContent = `// 範例 4: 使用 AnalyserNode 進行波形分析
+import { AudioEngine } from './src/core/AudioEngine.js';
+
+const engine = new AudioEngine({ sampleRate: 48000 });
+await engine.initialize();
+
+// 取得 AnalyserNode
+const analyser = engine.getAnalyser();
+analyser.fftSize = 2048;
+
+const bufferLength = analyser.frequencyBinCount;
+const timeDataArray = new Uint8Array(bufferLength);
+const freqDataArray = new Uint8Array(bufferLength);
+
+await engine.startRecording();
+
+// 繪製即時波形
+const canvas = document.getElementById('waveform-canvas');
+const ctx = canvas.getContext('2d');
+
+function drawWaveform() {
+  requestAnimationFrame(drawWaveform);
+  
+  // 取得時域數據（波形）
+  analyser.getByteTimeDomainData(timeDataArray);
+  
+  // 清空畫布
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // 繪製波形
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#00ff00';
+  ctx.beginPath();
+  
+  const sliceWidth = canvas.width / bufferLength;
+  let x = 0;
+  
+  for (let i = 0; i < bufferLength; i++) {
+    const v = timeDataArray[i] / 128.0;
+    const y = v * canvas.height / 2;
+    
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+    
+    x += sliceWidth;
+  }
+  
+  ctx.lineTo(canvas.width, canvas.height / 2);
+  ctx.stroke();
+}
+
+drawWaveform();
+
+// 頻譜分析
+function analyzeFrequency() {
+  analyser.getByteFrequencyData(freqDataArray);
+  
+  // 找出主要頻率
+  let maxValue = 0;
+  let maxIndex = 0;
+  
+  for (let i = 0; i < bufferLength; i++) {
+    if (freqDataArray[i] > maxValue) {
+      maxValue = freqDataArray[i];
+      maxIndex = i;
+    }
+  }
+  
+  // 計算頻率（Hz）
+  const sampleRate = engine.getAudioContext().sampleRate;
+  const frequency = (maxIndex * sampleRate) / (analyser.fftSize * 2);
+  
+  console.log(\`主要頻率: \${frequency.toFixed(2)} Hz (強度: \${maxValue})\`);
+}
+
+// 每秒分析一次頻譜
+setInterval(analyzeFrequency, 1000);
+
+// VU Meter 實作
+function updateVUMeter() {
+  analyser.getByteTimeDomainData(timeDataArray);
+  
+  // 計算 RMS
+  let sum = 0;
+  for (let i = 0; i < bufferLength; i++) {
+    const normalized = (timeDataArray[i] - 128) / 128;
+    sum += normalized * normalized;
+  }
+  const rms = Math.sqrt(sum / bufferLength);
+  
+  // 轉換為 dB
+  const db = 20 * Math.log10(rms);
+  const dbClamped = Math.max(-60, Math.min(0, db));
+  
+  // 更新 UI
+  const percentage = ((dbClamped + 60) / 60) * 100;
+  document.getElementById('vu-meter').style.width = percentage + '%';
+  document.getElementById('db-value').textContent = dbClamped.toFixed(1) + ' dB';
+}
+
+// 持續更新 VU Meter
+function vuLoop() {
+  if (engine.isRecording) {
+    updateVUMeter();
+    requestAnimationFrame(vuLoop);
+  }
+}
+vuLoop();`;
+            addLog('顯示範例 4: 波形分析', 'info');
+        });
+        
+        // 預設顯示範例 1
+        document.getElementById('btn-example-basic').click();
+    </script>
+</body>
+</html>
