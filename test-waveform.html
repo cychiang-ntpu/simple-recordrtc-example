@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WaveformRenderer 模組測試</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .status {
+            padding: 15px;
+            background: #f0f4f8;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            color: white;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+        }
+        
+        .btn-info {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+        
+        .canvas-section {
+            margin-bottom: 30px;
+        }
+        
+        .canvas-label {
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 8px;
+            display: block;
+        }
+        
+        canvas {
+            width: 100%;
+            height: auto;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            background: #f9f9f9;
+            display: block;
+        }
+        
+        .module-info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 30px;
+            border-left: 4px solid #2196f3;
+        }
+        
+        .module-info h3 {
+            color: #1976d2;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        
+        .module-info ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .module-info li {
+            padding: 5px 0;
+            color: #555;
+        }
+        
+        .module-info li:before {
+            content: "✓ ";
+            color: #4caf50;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 WaveformRenderer 模組測試</h1>
+        <p class="subtitle">測試從 app.js 提取的波形渲染模組（1,140 行代碼）</p>
+        
+        <div id="status" class="status">
+            ⏳ 正在載入模組...
+        </div>
+        
+        <div class="controls">
+            <button id="btnInit" class="btn-primary">初始化模組</button>
+            <button id="btnStart" class="btn-success" disabled>開始錄音</button>
+            <button id="btnStop" class="btn-danger" disabled>停止錄音</button>
+            <button id="btnTest" class="btn-info" disabled>測試波形</button>
+            <button id="btnRefreshOverview" class="btn-info" disabled>刷新概覽</button>
+        </div>
+        
+        <div class="canvas-section">
+            <label class="canvas-label">即時波形 (LiveWaveform)</label>
+            <canvas id="liveCanvas" width="800" height="120"></canvas>
+        </div>
+        
+        <div class="canvas-section">
+            <label class="canvas-label">音量表 (VUMeter)</label>
+            <canvas id="vuMeterCanvas" width="800" height="50"></canvas>
+        </div>
+        
+        <div class="canvas-section">
+            <label class="canvas-label">累積波形 (AccumulatedWaveform)</label>
+            <canvas id="accumulatedCanvas" width="800" height="200"></canvas>
+        </div>
+        
+        <div class="canvas-section">
+            <label class="canvas-label">概覽波形 (OverviewWaveform)</label>
+            <canvas id="overviewCanvas" width="800" height="80"></canvas>
+        </div>
+        
+        <div class="module-info">
+            <h3>📦 已提取的模組</h3>
+            <ul>
+                <li><strong>WaveformRenderer</strong> - 統一管理器 (管理所有波形組件)</li>
+                <li><strong>LiveWaveform</strong> - 即時波形顯示 (從 AnalyserNode 即時繪製)</li>
+                <li><strong>VUMeter</strong> - 音量表 (RMS/Peak dBFS，支援 Peak Hold)</li>
+                <li><strong>AccumulatedWaveform</strong> - 累積波形 (支援 Worker 加速、縮放、平移)</li>
+                <li><strong>OverviewWaveform</strong> - 全局概覽 (顯示整體波形與可視範圍)</li>
+                <li><strong>Workers</strong> - wf-worker.js (527行) + pcm-collector.js (49行)</li>
+            </ul>
+        </div>
+    </div>
+    
+    <script type="module">
+        import { WaveformRenderer, LiveWaveform, VUMeter, AccumulatedWaveform, OverviewWaveform } from './src/core/WaveformRenderer.js';
+        
+        const statusDiv = document.getElementById('status');
+        const btnInit = document.getElementById('btnInit');
+        const btnStart = document.getElementById('btnStart');
+        const btnStop = document.getElementById('btnStop');
+        const btnTest = document.getElementById('btnTest');
+        const btnRefreshOverview = document.getElementById('btnRefreshOverview');
+        
+        let waveformRenderer = null;
+        let audioContext = null;
+        let analyserNode = null;
+        let stream = null;
+        let workletNode = null;  // 保存 AudioWorklet 節點引用
+        let scriptNode = null;   // 保存 ScriptProcessor 節點引用
+        let micSource = null;    // 保存麥克風來源節點引用
+        
+        function updateStatus(message, type = 'info') {
+            statusDiv.textContent = message;
+            statusDiv.className = 'status';
+            if (type === 'success') statusDiv.classList.add('success');
+            if (type === 'error') statusDiv.classList.add('error');
+        }
+        
+        btnInit.addEventListener('click', async () => {
+            try {
+                updateStatus('⏳ 正在初始化 WaveformRenderer...');
+                
+                // 創建 Web Audio 上下文
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyserNode = audioContext.createAnalyser();
+                analyserNode.fftSize = 2048;
+                
+                // 初始化 WaveformRenderer
+                waveformRenderer = new WaveformRenderer({
+                    liveCanvas: document.getElementById('liveCanvas'),
+                    vuMeterCanvas: document.getElementById('vuMeterCanvas'),
+                    accumulatedCanvas: document.getElementById('accumulatedCanvas'),
+                    overviewCanvas: document.getElementById('overviewCanvas'),
+                    analyserNode: analyserNode,
+                    workerPath: './src/workers/wf-worker.js',
+                    useWorker: false, // 暫時禁用 Worker 以簡化調試
+                    showClipMarks: true
+                });
+                
+                await waveformRenderer.initialize();
+                
+                console.log('✅ WaveformRenderer 初始化完成:', {
+                    liveWaveform: !!waveformRenderer.liveWaveform,
+                    vuMeter: !!waveformRenderer.vuMeter,
+                    accumulatedWaveform: !!waveformRenderer.accumulatedWaveform,
+                    overviewWaveform: !!waveformRenderer.overviewWaveform
+                });
+                
+                updateStatus('✅ WaveformRenderer 初始化成功！所有模組已載入。', 'success');
+                
+                btnInit.disabled = true;
+                btnStart.disabled = false;
+                btnTest.disabled = false;
+                btnRefreshOverview.disabled = false;
+                
+            } catch (error) {
+                updateStatus(`❌ 初始化失敗: ${error.message}`, 'error');
+                console.error('初始化錯誤:', error);
+            }
+        });
+        
+        btnStart.addEventListener('click', async () => {
+            try {
+                updateStatus('⏳ 正在請求麥克風權限...');
+                
+                // 請求麥克風
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    } 
+                });
+                
+                // 重要：先啟動 AudioContext（如果被暫停）
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                // 開始即時波形顯示（傳遞 audioContext）
+                console.log('🎤 開始啟動 LiveWaveform 和 VUMeter...');
+                waveformRenderer.startLive(stream, audioContext);
+                
+                updateStatus('🎙️ 正在錄音中... 請對著麥克風說話', 'success');
+                
+                btnStart.disabled = true;
+                btnStop.disabled = false;
+                
+                // 真實從麥克風捕獲 PCM 數據
+                let pcmInterval = null;
+                
+                // 檢查是否支援 AudioWorklet
+                if (audioContext.audioWorklet) {
+                    try {
+                        await audioContext.audioWorklet.addModule('./src/workers/pcm-collector.js');
+                        
+                        workletNode = new AudioWorkletNode(audioContext, 'pcm-collector');
+                        micSource = audioContext.createMediaStreamSource(stream);
+                        
+                        micSource.connect(workletNode);
+                        workletNode.connect(audioContext.destination);
+                        
+                        workletNode.port.onmessage = (event) => {
+                            if (event.data.type === 'pcm') {
+                                const pcmData = new Float32Array(event.data.buffer, 0, event.data.length);
+                                waveformRenderer.appendPCM(pcmData);
+                                
+                                // 每秒記錄一次
+                                if (!window._lastPcmLog) window._lastPcmLog = 0;
+                                const now = Date.now();
+                                if (now - window._lastPcmLog > 1000) {
+                                    console.log('📊 PCM 數據:', pcmData.length, '樣本');
+                                    window._lastPcmLog = now;
+                                }
+                            }
+                        };
+                        
+                        console.log('✅ AudioWorklet 模式啟動成功');
+                        
+                    } catch (e) {
+                        console.warn('AudioWorklet 失敗，使用 ScriptProcessor:', e);
+                        setupScriptProcessor();
+                    }
+                } else {
+                    setupScriptProcessor();
+                }
+                
+                function setupScriptProcessor() {
+                    // 降級方案：使用 ScriptProcessorNode
+                    scriptNode = audioContext.createScriptProcessor(4096, 1, 1);
+                    micSource = audioContext.createMediaStreamSource(stream);
+                    
+                    micSource.connect(scriptNode);
+                    scriptNode.connect(audioContext.destination);
+                    
+                    scriptNode.onaudioprocess = (e) => {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        const pcmData = new Float32Array(inputData);
+                        waveformRenderer.appendPCM(pcmData);
+                        
+                        // 每秒記錄一次
+                        if (!window._lastPcmLog) window._lastPcmLog = 0;
+                        const now = Date.now();
+                        if (now - window._lastPcmLog > 1000) {
+                            console.log('📊 PCM 數據 (ScriptProcessor):', pcmData.length, '樣本');
+                            window._lastPcmLog = now;
+                        }
+                    };
+                    
+                    console.log('✅ ScriptProcessor 模式啟動成功');
+                }
+                
+            } catch (error) {
+                updateStatus(`❌ 麥克風錯誤: ${error.message}`, 'error');
+                console.error('麥克風錯誤:', error);
+            }
+        });
+        
+        btnStop.addEventListener('click', () => {
+            console.log('⏹️ 停止錄音...');
+            
+            // 停止即時波形和 VU Meter
+            if (waveformRenderer) {
+                waveformRenderer.stopLive();
+            }
+            
+            // 斷開所有音訊節點
+            if (workletNode) {
+                try {
+                    workletNode.disconnect();
+                    workletNode.port.onmessage = null;
+                    console.log('✅ AudioWorklet 已斷開');
+                } catch (e) {
+                    console.warn('斷開 AudioWorklet 失敗:', e);
+                }
+                workletNode = null;
+            }
+            
+            if (scriptNode) {
+                try {
+                    scriptNode.disconnect();
+                    scriptNode.onaudioprocess = null;
+                    console.log('✅ ScriptProcessor 已斷開');
+                } catch (e) {
+                    console.warn('斷開 ScriptProcessor 失敗:', e);
+                }
+                scriptNode = null;
+            }
+            
+            if (micSource) {
+                try {
+                    micSource.disconnect();
+                    console.log('✅ 麥克風來源已斷開');
+                } catch (e) {
+                    console.warn('斷開麥克風來源失敗:', e);
+                }
+                micSource = null;
+            }
+            
+            // 停止麥克風 stream
+            if (stream) {
+                stream.getTracks().forEach(track => {
+                    track.stop();
+                    console.log('✅ 麥克風軌道已停止:', track.label);
+                });
+                stream = null;
+            }
+            
+            updateStatus('⏹️ 錄音已停止');
+            
+            btnStart.disabled = false;
+            btnStop.disabled = true;
+        });
+        
+        btnTest.addEventListener('click', () => {
+            updateStatus('🧪 正在測試波形繪製...');
+            
+            // 生成測試正弦波
+            const testPCM = new Float32Array(48000); // 1 秒 @ 48kHz
+            for (let i = 0; i < testPCM.length; i++) {
+                // 多頻率混合
+                testPCM[i] = 
+                    Math.sin(2 * Math.PI * 220 * i / 48000) * 0.3 +
+                    Math.sin(2 * Math.PI * 440 * i / 48000) * 0.2 +
+                    Math.sin(2 * Math.PI * 880 * i / 48000) * 0.1;
+            }
+            
+            waveformRenderer.appendPCM(testPCM);
+            
+            updateStatus('✅ 測試波形已添加 (1 秒音訊)', 'success');
+        });
+        
+        btnRefreshOverview.addEventListener('click', () => {
+            console.log('🔄 手動刷新 OverviewWaveform...');
+            if (waveformRenderer && waveformRenderer.overviewWaveform) {
+                waveformRenderer.overviewWaveform.draw();
+            } else {
+                console.error('❌ OverviewWaveform 不存在');
+            }
+        });
+        
+        // 模組載入成功
+        updateStatus('✅ 模組載入成功！點擊「初始化模組」開始。', 'success');
+        
+    </script>
+</body>
+</html>
