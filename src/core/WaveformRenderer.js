@@ -22,6 +22,7 @@ export class WaveformRenderer {
      * @param {HTMLCanvasElement} options.accumulatedCanvas - 累積波形 Canvas
      * @param {HTMLCanvasElement} options.overviewCanvas - 概覽波形 Canvas
      * @param {AnalyserNode} options.analyserNode - Web Audio AnalyserNode
+     * @param {Object} options.audioEngine - AudioEngine 實例（可選，會自動獲取 analyserNode）
      * @param {string} [options.workerPath] - Worker 腳本路徑
      * @param {boolean} [options.useWorker=true] - 是否使用 Worker
      * @param {boolean} [options.showClipMarks=true] - 是否顯示削波標記
@@ -34,6 +35,9 @@ export class WaveformRenderer {
             ...options
         };
         
+        // 支援從 audioEngine 獲取 analyserNode
+        this.audioEngine = options.audioEngine;
+        
         this.liveWaveform = null;
         this.vuMeter = null;
         this.accumulatedWaveform = null;
@@ -41,13 +45,49 @@ export class WaveformRenderer {
         
         this.isVerticalMode = false;
         this._overviewUpdateScheduled = false;
+        
+        // 如果提供了 audioEngine，監聽錄音事件
+        if (this.audioEngine) {
+            this._setupAudioEngineListeners();
+        }
+    }
+    
+    /**
+     * 設置 AudioEngine 事件監聽
+     * @private
+     */
+    _setupAudioEngineListeners() {
+        if (!this.audioEngine) return;
+        
+        // 錄音開始時自動啟動波形
+        this.audioEngine.on('recording-start', () => {
+            this.start();
+        });
+        
+        // 錄音停止時停止波形
+        this.audioEngine.on('recording-stop', () => {
+            this.stopLive();
+        });
+        
+        // PCM 數據到達時更新累積波形
+        this.audioEngine.on('data-available', (data) => {
+            if (data.pcmData && this.accumulatedWaveform) {
+                this.appendPCM(data.pcmData);
+            }
+        });
     }
     
     /**
      * 初始化所有波形組件
      */
     async initialize() {
-        const { liveCanvas, vuMeterCanvas, accumulatedCanvas, overviewCanvas, analyserNode } = this.options;
+        const { liveCanvas, vuMeterCanvas, accumulatedCanvas, overviewCanvas } = this.options;
+        
+        // 從 audioEngine 或 options 獲取 analyserNode
+        let analyserNode = this.options.analyserNode;
+        if (!analyserNode && this.audioEngine && typeof this.audioEngine.getAnalyser === 'function') {
+            analyserNode = this.audioEngine.getAnalyser();
+        }
         
         // 初始化即時波形
         if (liveCanvas && analyserNode) {
@@ -86,6 +126,25 @@ export class WaveformRenderer {
         }
         if (this.vuMeter) {
             this.vuMeter.start();
+        }
+    }
+    
+    /**
+     * 開始波形顯示（簡化版，從 audioEngine 自動獲取資訊）
+     */
+    start() {
+        if (!this.audioEngine) {
+            console.warn('No audioEngine provided, cannot start waveform rendering');
+            return;
+        }
+        
+        // 獲取必要資訊
+        const stream = this.audioEngine.microphoneStream;
+        const audioContext = this.audioEngine.audioContext;
+        const preGainNode = this.audioEngine.preGainNode;
+        
+        if (stream && audioContext) {
+            this.startLive(stream, audioContext, preGainNode);
         }
     }
     
@@ -723,7 +782,96 @@ export class AccumulatedWaveform {
             }
         }
         
+        // 設置滑鼠互動
+        this._setupMouseInteraction();
+        
         this.clear();
+    }
+    
+    /**
+     * 設置滑鼠互動（平移、縮放、點擊定位）
+     * @private
+     */
+    _setupMouseInteraction() {
+        if (!this.canvas) return;
+        
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartViewStart = 0;
+        
+        // 滑鼠按下
+        this.canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            dragStartX = e.offsetX;
+            dragStartViewStart = this.viewStart;
+            this.isAutoScroll = false;
+            this.canvas.style.cursor = 'grabbing';
+        });
+        
+        // 滑鼠移動（拖曳）
+        this.canvas.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            const deltaX = e.offsetX - dragStartX;
+            const info = this.getVisibleSamples();
+            const samplesPerPixel = info.visible / this.width;
+            const sampleDelta = Math.round(-deltaX * samplesPerPixel);
+            
+            this.viewStart = dragStartViewStart + sampleDelta;
+            this._enforceViewBounds();
+            this.draw();
+        });
+        
+        // 滑鼠放開
+        this.canvas.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                this.canvas.style.cursor = 'grab';
+            }
+        });
+        
+        // 滑鼠離開 canvas
+        this.canvas.addEventListener('mouseleave', () => {
+            if (isDragging) {
+                isDragging = false;
+                this.canvas.style.cursor = 'default';
+            }
+        });
+        
+        // 滑鼠滾輪（縮放）
+        this.canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            
+            // 計算滑鼠位置相對於 canvas 的比例
+            const rect = this.canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const anchorRatio = x / this.width;
+            
+            // 根據滾輪方向縮放
+            const zoomSteps = e.deltaY > 0 ? -1 : 1;
+            this.zoomBySteps(zoomSteps, anchorRatio);
+        });
+        
+        // 點擊定位（跳到播放位置）
+        this.canvas.addEventListener('click', (e) => {
+            if (isDragging) return; // 如果是拖曳結束，不觸發點擊
+            
+            const info = this.getVisibleSamples();
+            const clickRatio = e.offsetX / this.width;
+            const clickedSample = Math.floor(info.start + clickRatio * info.visible);
+            
+            // 觸發自定義事件，讓外部處理播放跳轉
+            const event = new CustomEvent('waveform-seek', {
+                detail: {
+                    sample: clickedSample,
+                    time: clickedSample / this.sourceSampleRate
+                }
+            });
+            this.canvas.dispatchEvent(event);
+        });
+        
+        // 設置 cursor 樣式
+        this.canvas.style.cursor = 'grab';
     }
 
     clear() {
@@ -1102,8 +1250,87 @@ export class OverviewWaveform {
         this._warnedNoData = false;
         this._lastTotal = 0;
         
+        // 設置滑鼠互動
+        this._setupMouseInteraction();
+        
         // 注意：如果要啟用 Worker，需要確保 canvas 尚未獲取 context
         // 且 accumulatedWaveform 已成功轉移其 canvas 控制權
+    }
+    
+    /**
+     * 設置滑鼠互動（點擊跳轉、拖曳可視範圍）
+     * @private
+     */
+    _setupMouseInteraction() {
+        if (!this.canvas) return;
+        
+        let isDragging = false;
+        
+        // 滑鼠按下 - 點擊或開始拖曳
+        this.canvas.addEventListener('mousedown', (e) => {
+            const acc = this.accumulatedWaveform;
+            if (!acc || acc.sampleCount === 0) return;
+            
+            isDragging = true;
+            this._handleSeek(e.offsetX);
+            this.canvas.style.cursor = 'grabbing';
+        });
+        
+        // 滑鼠移動 - 拖曳更新
+        this.canvas.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            this._handleSeek(e.offsetX);
+        });
+        
+        // 滑鼠放開
+        this.canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+            this.canvas.style.cursor = 'pointer';
+        });
+        
+        // 滑鼠離開
+        this.canvas.addEventListener('mouseleave', () => {
+            if (isDragging) {
+                isDragging = false;
+                this.canvas.style.cursor = 'pointer';
+            }
+        });
+        
+        // 設置 cursor 樣式
+        this.canvas.style.cursor = 'pointer';
+    }
+    
+    /**
+     * 處理點擊/拖曳跳轉
+     * @private
+     */
+    _handleSeek(clickX) {
+        const acc = this.accumulatedWaveform;
+        if (!acc || acc.sampleCount === 0) return;
+        
+        const total = acc.sampleCount;
+        const clickRatio = Math.max(0, Math.min(1, clickX / this.width));
+        const targetSample = Math.floor(clickRatio * total);
+        
+        // 更新 accumulated waveform 的視圖位置
+        const info = acc.getVisibleSamples();
+        const halfVisible = Math.floor(info.visible / 2);
+        acc.viewStart = Math.max(0, Math.min(total - info.visible, targetSample - halfVisible));
+        acc.isAutoScroll = false;
+        acc._enforceViewBounds();
+        acc.draw();
+        
+        // 重繪 overview 以更新可視範圍指示器
+        this.draw();
+        
+        // 觸發自定義事件
+        const event = new CustomEvent('overview-seek', {
+            detail: {
+                sample: targetSample,
+                time: targetSample / acc.sourceSampleRate
+            }
+        });
+        this.canvas.dispatchEvent(event);
     }
 
     clear() {

@@ -9,6 +9,10 @@
 
 // 匯出核心模組
 export { AudioEngine } from './core/AudioEngine.js';
+export { WaveformRenderer } from './core/WaveformRenderer.js';
+
+// 匯出 UI 模組
+export { RecorderUI } from './ui/RecorderUI.js';
 
 // 匯出儲存模組
 export {

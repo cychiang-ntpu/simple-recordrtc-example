@@ -71,6 +71,9 @@ export class AudioEngine {
 
         // RecordRTC 錄音器
         this.recorder = null;
+        
+        // RecordRTC 模式 PCM 採集
+        this._pcmCaptureInterval = null;
 
         // 麥克風串流
         this.micStream = null;
@@ -399,6 +402,14 @@ export class AudioEngine {
     }
 
     /**
+     * 取得麥克風媒體流
+     * @returns {MediaStream|null}
+     */
+    get microphoneStream() {
+        return this.micStream;
+    }
+
+    /**
      * 設定前級增益
      * @param {number} gain - 增益值 (1.0-6.0)
      */
@@ -422,6 +433,7 @@ export class AudioEngine {
         }
 
         this._stopMicrophone();
+        this._stopPcmCapture();
 
         if (this.latestUrl) {
             URL.revokeObjectURL(this.latestUrl);
@@ -693,6 +705,9 @@ export class AudioEngine {
                 this.recorder.startRecording();
                 this.usingWorklet = false;
 
+                // 啟動 PCM 數據採集循環（用於累積波形）
+                this._startPcmCapture();
+
                 resolve();
 
             } catch (error) {
@@ -708,6 +723,9 @@ export class AudioEngine {
                     reject(new Error('RecordRTC 錄音器不存在'));
                     return;
                 }
+
+                // 停止 PCM 數據採集循環
+                this._stopPcmCapture();
 
                 this.recorder.stopRecording(() => {
                     try {
@@ -726,6 +744,52 @@ export class AudioEngine {
                 reject(error);
             }
         });
+    }
+
+    /**
+     * 啟動 PCM 數據採集（RecordRTC 模式使用）
+     * @private
+     */
+    _startPcmCapture() {
+        if (!this.analyser) return;
+
+        const bufferLength = this.analyser.fftSize;
+        const dataArray = new Float32Array(bufferLength);
+        
+        // 每 100ms 採集一次 PCM 數據
+        this._pcmCaptureInterval = setInterval(() => {
+            if (!this.isRecording || !this.analyser) {
+                return;
+            }
+
+            // 從 AnalyserNode 讀取時域數據
+            this.analyser.getFloatTimeDomainData(dataArray);
+            
+            // 複製數據以避免被覆蓋
+            const pcmChunk = new Float32Array(dataArray);
+            
+            // 儲存到 pcmChunks
+            this.pcmChunks.push(pcmChunk);
+            this.pcmTotalSamples += pcmChunk.length;
+
+            // 發送事件給 WaveformRenderer
+            this._emit('data-available', {
+                pcmData: pcmChunk,
+                totalSamples: this.pcmTotalSamples,
+                mode: 'recordrtc-pcm'
+            });
+        }, 100);
+    }
+
+    /**
+     * 停止 PCM 數據採集
+     * @private
+     */
+    _stopPcmCapture() {
+        if (this._pcmCaptureInterval) {
+            clearInterval(this._pcmCaptureInterval);
+            this._pcmCaptureInterval = null;
+        }
     }
 
     // ============================================================

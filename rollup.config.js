@@ -12,6 +12,7 @@ import commonjs from '@rollup/plugin-commonjs';
 import terser from '@rollup/plugin-terser';
 import babel from '@rollup/plugin-babel';
 import { readFileSync } from 'fs';
+import copy from 'rollup-plugin-copy';
 
 // 讀取 package.json
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'));
@@ -20,6 +21,9 @@ const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'));
 const banner = `/*!
  * ${pkg.name} v${pkg.version}
  * ${pkg.description}
+ * 
+ * Includes RecordRTC v5.6.2 (https://github.com/muaz-khan/RecordRTC)
+ * RecordRTC License: MIT
  * 
  * @license ${pkg.license}
  * @author ${pkg.author}
@@ -54,6 +58,14 @@ const plugins = [
         modules: false
       }]
     ]
+  }),
+  
+  // 複製 RecordRTC 到 dist/vendor
+  copy({
+    targets: [
+      { src: 'public/assets/js/RecordRTC.js', dest: 'dist/vendor' }
+    ],
+    hook: 'writeBundle'
   })
 ];
 
@@ -102,7 +114,7 @@ export default [
     },
     external,
     plugins: [
-      ...plugins,
+      ...plugins.filter(p => p.name !== 'copy'), // 移除 copy plugin 避免重複
       terser({
         format: {
           comments: /^!/
