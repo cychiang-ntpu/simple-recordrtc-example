@@ -1427,6 +1427,8 @@
         // 初始化概覽波形
         if (overviewCanvas && this.accumulatedWaveform) {
           this.overviewWaveform = new OverviewWaveform(overviewCanvas, this.accumulatedWaveform);
+          // 建立雙向引用，讓累積波形可以通知概覽波形更新
+          this.accumulatedWaveform.overviewWaveform = this.overviewWaveform;
         }
       }
 
@@ -1996,6 +1998,9 @@
         this.rawZoomMode = false;
         this.rawViewStart = 0;
         this.rawVisibleRaw = 0;
+
+        // 關聯的 OverviewWaveform（用於同步更新）
+        this.overviewWaveform = null;
         this._useWorker = options.useWorker !== false;
         this._worker = null;
         this._appendBatchMin = [];
@@ -2079,6 +2084,11 @@
           this.viewStart = dragStartViewStart + sampleDelta;
           this._enforceViewBounds();
           this.draw();
+
+          // 同步更新 OverviewWaveform
+          if (this.overviewWaveform) {
+            this.overviewWaveform.draw();
+          }
         });
 
         // 滑鼠放開
@@ -2268,25 +2278,51 @@
 
         // 主線程繪製
         this.clear();
-        const total = this.sampleMin.length;
-        if (!total) return;
-        const visibleSamples = Math.min(total, Math.round(total / this.zoomFactor));
-        const start = Math.min(this.viewStart, Math.max(0, total - visibleSamples));
-        const end = Math.min(total, start + visibleSamples);
+        if (this.sampleCount === 0) return;
+
+        // 使用 getVisibleSamples() 獲取正確的可見範圍
+        const info = this.getVisibleSamples();
+        const {
+          start,
+          end,
+          visible
+        } = info;
+        if (visible === 0 || start >= end) return;
         const centerY = this.height / 2;
 
-        // 繪製波形 - 批次處理
+        // 繪製波形 - 使用 sample 之間的連線
         this.canvasContext.strokeStyle = '#1E88E5';
-        this.canvasContext.lineWidth = 1;
-        this.canvasContext.beginPath();
-        for (let i = start; i < end; i++) {
-          const x = Math.floor((i - start) / visibleSamples * this.width) + 0.5;
-          const yMin = Math.floor(centerY - this.sampleMax[i] * centerY * 0.95);
-          const yMax = Math.floor(centerY - this.sampleMin[i] * centerY * 0.95);
+        this.canvasContext.lineWidth = 1.5;
+        this.canvasContext.lineJoin = 'round';
+        this.canvasContext.lineCap = 'round';
 
-          // 繪製垂直線段
-          this.canvasContext.moveTo(x, yMin);
-          this.canvasContext.lineTo(x, yMax);
+        // 繪製上半部波形（最大值）
+        this.canvasContext.beginPath();
+        let hasFirstPoint = false;
+        for (let i = start; i < end; i++) {
+          const x = (i - start) / visible * this.width;
+          const y = centerY - this.sampleMax[i] * centerY * 0.95;
+          if (!hasFirstPoint) {
+            this.canvasContext.moveTo(x, y);
+            hasFirstPoint = true;
+          } else {
+            this.canvasContext.lineTo(x, y);
+          }
+        }
+        this.canvasContext.stroke();
+
+        // 繪製下半部波形（最小值）
+        this.canvasContext.beginPath();
+        hasFirstPoint = false;
+        for (let i = start; i < end; i++) {
+          const x = (i - start) / visible * this.width;
+          const y = centerY - this.sampleMin[i] * centerY * 0.95;
+          if (!hasFirstPoint) {
+            this.canvasContext.moveTo(x, y);
+            hasFirstPoint = true;
+          } else {
+            this.canvasContext.lineTo(x, y);
+          }
         }
         this.canvasContext.stroke();
 
@@ -2319,11 +2355,26 @@
         };
       }
       _getMinVisibleSamples(total) {
-        return Math.max(1, Math.floor(this.width / 2));
+        // 允許放大到看到每個 sample
+        // 最小可見樣本數設為 canvas 寬度的 1/10，這樣每個 sample 可以占據約 10 個像素
+        return Math.max(10, Math.floor(this.width / 10));
       }
       _enforceViewBounds() {
+        if (this.sampleCount === 0) {
+          this.viewStart = 0;
+          return;
+        }
         const info = this.getVisibleSamples();
         this.viewStart = info.start;
+
+        // 確保 viewStart 在有效範圍內
+        if (this.viewStart < 0) {
+          this.viewStart = 0;
+        }
+        const maxStart = Math.max(0, this.sampleCount - info.visible);
+        if (this.viewStart > maxStart) {
+          this.viewStart = maxStart;
+        }
       }
       scrollToLatest() {
         const total = this.sampleCount;
@@ -2335,25 +2386,47 @@
         if (this.viewStart < 0) this.viewStart = 0;
       }
       setZoom(targetZoom, anchorSample) {
+        if (this.sampleCount === 0) return;
         if (targetZoom < 1) targetZoom = 1;
         const maxZoom = Math.max(1, this.sampleCount / this._getMinVisibleSamples(this.sampleCount));
         if (targetZoom > maxZoom) targetZoom = maxZoom;
         const oldInfo = this.getVisibleSamples();
         this.zoomFactor = targetZoom;
         const newInfo = this.getVisibleSamples();
-        if (typeof anchorSample === 'number' && anchorSample >= 0) {
+
+        // 如果有錨點 sample，保持其視覺位置
+        if (typeof anchorSample === 'number' && anchorSample >= 0 && oldInfo.visible > 0) {
           const oldRatio = (anchorSample - oldInfo.start) / oldInfo.visible;
           const desiredStart = anchorSample - oldRatio * newInfo.visible;
-          this.viewStart = Math.max(0, Math.min(this.sampleCount - newInfo.visible, desiredStart));
+          this.viewStart = Math.max(0, Math.min(this.sampleCount - newInfo.visible, Math.floor(desiredStart)));
+        } else {
+          // 沒有錨點時，保持視圖中心
+          const oldCenter = oldInfo.start + oldInfo.visible / 2;
+          const desiredStart = oldCenter - newInfo.visible / 2;
+          this.viewStart = Math.max(0, Math.min(this.sampleCount - newInfo.visible, Math.floor(desiredStart)));
         }
         this._enforceViewBounds();
         this.draw();
+
+        // 同步更新 OverviewWaveform
+        if (this.overviewWaveform) {
+          this.overviewWaveform.draw();
+        }
       }
       zoomBySteps(stepCount, anchorRatio = 0.5) {
-        if (stepCount === 0) return;
-        const zoomStep = 1.2;
+        if (stepCount === 0 || this.sampleCount === 0) return;
+
+        // 增加縮放步進，從 1.2 改為 1.5，讓縮放更快
+        const zoomStep = 1.5;
         const oldInfo = this.getVisibleSamples();
-        const anchorSample = oldInfo.start + anchorRatio * oldInfo.visible;
+
+        // 確保 oldInfo.visible > 0 才計算錨點
+        let anchorSample;
+        if (oldInfo.visible > 0) {
+          anchorSample = oldInfo.start + anchorRatio * oldInfo.visible;
+        } else {
+          anchorSample = 0;
+        }
         let newZoom = this.zoomFactor;
         if (stepCount > 0) {
           newZoom *= Math.pow(zoomStep, stepCount);
@@ -2368,6 +2441,11 @@
         this.viewStart += sampleDelta;
         this._enforceViewBounds();
         this.draw();
+
+        // 同步更新 OverviewWaveform
+        if (this.overviewWaveform) {
+          this.overviewWaveform.draw();
+        }
       }
       panByPixels(pixelDelta) {
         if (pixelDelta === 0) return;
@@ -2385,6 +2463,11 @@
         this._panRemainder = 0;
         this.scrollToLatest();
         this.draw();
+
+        // 同步更新 OverviewWaveform
+        if (this.overviewWaveform) {
+          this.overviewWaveform.draw();
+        }
       }
       setSourceSampleRate(sampleRate) {
         this.sourceSampleRate = sampleRate || 48000;
