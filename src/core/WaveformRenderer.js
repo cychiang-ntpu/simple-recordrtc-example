@@ -1353,6 +1353,10 @@ export class OverviewWaveform {
         if (!this.canvas) return;
         
         let isDragging = false;
+        let dragStartX = 0;
+        let dragStartViewStart = 0;
+        let dragClickedSample = 0; // 記錄點擊位置對應的絕對樣本位置
+        let dragVisibleSamples = 0; // 記錄拖曳開始時的可視範圍大小
         
         // 滑鼠按下 - 點擊或開始拖曳
         this.canvas.addEventListener('mousedown', (e) => {
@@ -1360,14 +1364,51 @@ export class OverviewWaveform {
             if (!acc || acc.sampleCount === 0) return;
             
             isDragging = true;
-            this._handleSeek(e.offsetX);
+            dragStartX = e.offsetX;
+            dragStartViewStart = acc.viewStart;
+            
+            // 記錄拖曳開始時的狀態
+            const total = acc.sampleCount;
+            const info = acc.getVisibleSamples();
+            dragVisibleSamples = info.visible;
+            
+            // 計算點擊位置在可視範圍指示器內的偏移
+            // 使用與繪製時相同的座標映射邏輯
+            const viewStartX = Math.floor((info.start / total) * this.width);
+            const offsetInView = e.offsetX - viewStartX;
+            dragClickedSample = offsetInView; // 記錄在可視範圍內的像素偏移
+            
             this.canvas.style.cursor = 'grabbing';
         });
         
         // 滑鼠移動 - 拖曳更新
         this.canvas.addEventListener('mousemove', (e) => {
             if (!isDragging) return;
-            this._handleSeek(e.offsetX);
+            
+            const acc = this.accumulatedWaveform;
+            if (!acc || acc.sampleCount === 0) return;
+            
+            const total = acc.sampleCount;
+            
+            // 計算新的可視範圍起始位置（像素）
+            // 保持滑鼠在可視範圍內的相對位置不變
+            const targetViewStartX = e.offsetX - dragClickedSample;
+            
+            // 像素 → 樣本（使用反向映射）
+            const newViewStart = Math.floor((targetViewStartX / this.width) * total);
+            
+            // 確保 viewStart 在有效範圍內
+            const maxViewStart = Math.max(0, total - dragVisibleSamples);
+            const clampedViewStart = Math.max(0, Math.min(maxViewStart, newViewStart));
+            
+            // 更新視圖
+            acc.viewStart = clampedViewStart;
+            acc.isAutoScroll = false;
+            acc._enforceViewBounds();
+            acc.draw();
+            
+            // 重繪 overview
+            this.draw();
         });
         
         // 滑鼠放開
@@ -1400,10 +1441,35 @@ export class OverviewWaveform {
         const clickRatio = Math.max(0, Math.min(1, clickX / this.width));
         const targetSample = Math.floor(clickRatio * total);
         
+        // 獲取當前縮放級別下的可見樣本數
+        // 注意：這裡我們需要在設置 viewStart 之前就知道可見範圍
+        const currentZoom = acc.zoomFactor;
+        const minVis = acc._getMinVisibleSamples(total);
+        let visibleSamples = Math.max(minVis, Math.round(total / currentZoom));
+        if (visibleSamples > total) visibleSamples = total;
+        
+        // 計算新的 viewStart，讓 targetSample 位於可見範圍的中心
+        const halfVisible = Math.floor(visibleSamples / 2);
+        let newViewStart = targetSample - halfVisible;
+        
+        // 確保 viewStart 在有效範圍內
+        const maxViewStart = Math.max(0, total - visibleSamples);
+        newViewStart = Math.max(0, Math.min(maxViewStart, newViewStart));
+        
+        console.log('🎯 OverviewWaveform 導航:', {
+            clickX,
+            clickRatio: clickRatio.toFixed(3),
+            targetSample,
+            total,
+            visibleSamples,
+            halfVisible,
+            newViewStart,
+            maxViewStart,
+            zoomFactor: currentZoom
+        });
+        
         // 更新 accumulated waveform 的視圖位置
-        const info = acc.getVisibleSamples();
-        const halfVisible = Math.floor(info.visible / 2);
-        acc.viewStart = Math.max(0, Math.min(total - info.visible, targetSample - halfVisible));
+        acc.viewStart = newViewStart;
         acc.isAutoScroll = false;
         acc._enforceViewBounds();
         acc.draw();

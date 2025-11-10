@@ -127,8 +127,17 @@ export class AudioEngine {
 
         try {
             // 創建 AudioContext
+            // 注意：不指定 sampleRate，讓 AudioContext 使用硬體預設值
+            // 這樣可以避免 "different sample-rate" 錯誤
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-            this.audioContext = new AudioContextClass({ sampleRate: this.config.sampleRate });
+            this.audioContext = new AudioContextClass();
+            
+            // 記錄實際使用的採樣率
+            console.log(`[AudioEngine] AudioContext 採樣率: ${this.audioContext.sampleRate} Hz`);
+            console.log(`[AudioEngine] 配置要求的採樣率: ${this.config.sampleRate} Hz`);
+            if (this.audioContext.sampleRate !== this.config.sampleRate) {
+                console.warn(`[AudioEngine] 注意：實際採樣率 (${this.audioContext.sampleRate}) 與配置 (${this.config.sampleRate}) 不同`);
+            }
 
             // 創建分析器節點
             this.analyser = this.audioContext.createAnalyser();

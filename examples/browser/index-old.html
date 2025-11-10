@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VoiceBank Recorder - 瀏覽器範例</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    
+    .container {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      padding: 40px;
+      max-width: 900px;
+      width: 100%;
+    }
+    
+    h1 {
+      text-align: center;
+      color: #667eea;
+      margin-bottom: 10px;
+      font-size: 2.5em;
+    }
+    
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 1.1em;
+    }
+    
+    .info-box {
+      background: #f0f4ff;
+      border-left: 4px solid #667eea;
+      padding: 15px 20px;
+      margin-bottom: 30px;
+      border-radius: 5px;
+    }
+    
+    .info-box h3 {
+      color: #667eea;
+      margin-bottom: 10px;
+    }
+    
+    .info-box ul {
+      list-style-position: inside;
+      color: #555;
+    }
+    
+    .info-box li {
+      margin-bottom: 5px;
+    }
+    
+    /* VoiceBank Recorder UI Styles */
+    .voicebank-recorder {
+      margin-top: 20px;
+    }
+    
+    .recorder-controls {
+      text-align: center;
+      margin-bottom: 20px;
+      padding: 20px;
+      background: #f9fafb;
+      border-radius: 10px;
+    }
+    
+    .recorder-controls button {
+      font-size: 16px;
+      padding: 12px 30px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .btn-record {
+      background: #ef4444;
+      color: white;
+    }
+    
+    .btn-record:hover:not(:disabled) {
+      background: #dc2626;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+    }
+    
+    .btn-record.recording {
+      background: #f59e0b;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    
+    .recording-info {
+      margin-top: 15px;
+      font-size: 14px;
+      color: #666;
+    }
+    
+    .recording-info span {
+      margin: 0 10px;
+    }
+    
+    .waveform-wrapper {
+      margin: 20px 0;
+    }
+    
+    .waveform-section {
+      margin-bottom: 20px;
+    }
+    
+    .waveform-section label {
+      display: block;
+      font-weight: 600;
+      color: #555;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    
+    .waveform-section canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #f9fafb;
+    }
+    
+    .playback-controls {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin: 20px 0;
+      padding: 20px;
+      background: #f9fafb;
+      border-radius: 10px;
+    }
+    
+    .playback-controls button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .btn-play {
+      background: #10b981;
+      color: white;
+    }
+    
+    .btn-play:hover:not(:disabled) {
+      background: #059669;
+      transform: translateY(-2px);
+    }
+    
+    .btn-pause {
+      background: #f59e0b;
+      color: white;
+    }
+    
+    .btn-pause:hover:not(:disabled) {
+      background: #d97706;
+      transform: translateY(-2px);
+    }
+    
+    .btn-stop {
+      background: #ef4444;
+      color: white;
+    }
+    
+    .btn-pause:hover:not(:disabled) {
+      background: #d97706;
+      transform: translateY(-2px);
+    }
+    
+    .btn-download {
+      background: #667eea;
+      color: white;
+    }
+    
+    .btn-download:hover:not(:disabled) {
+      background: #5568d3;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    }
+    
+    .playback-controls button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .toolbar {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    
+    .toolbar button {
+      padding: 10px 20px;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      background: white;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      color: #555;
+      transition: all 0.3s ease;
+    }
+    
+    .toolbar button:hover:not(:disabled) {
+      border-color: #667eea;
+      color: #667eea;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+    }
+    
+    .toolbar button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .toolbar-btn {
+      padding: 8px 16px;
+      border: 1px solid #d0d0d0;
+      border-radius: 6px;
+      background: white;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      color: #555;
+      transition: all 0.2s ease;
+    }
+    
+    .toolbar-btn:hover:not(:disabled) {
+      border-color: #667eea;
+      color: #667eea;
+      background: #f0f4ff;
+    }
+    
+    .toolbar-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    
+    .status-log {
+      margin-top: 30px;
+      padding: 20px;
+      background: #1f2937;
+      color: #10b981;
+      border-radius: 10px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.8;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    
+    .status-log .log-entry {
+      margin-bottom: 5px;
+    }
+    
+    .status-log .log-time {
+      color: #6b7280;
+      margin-right: 10px;
+    }
+    
+    .status-log .log-error {
+      color: #ef4444;
+    }
+    
+    .status-log .log-warning {
+      color: #f59e0b;
+    }
+    
+    .status-log .log-info {
+      color: #3b82f6;
+    }
+    
+    footer {
+      margin-top: 30px;
+      text-align: center;
+      color: #999;
+      font-size: 14px;
+    }
+    
+    footer a {
+      color: #667eea;
+      text-decoration: none;
+    }
+    
+    footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎙️ VoiceBank Recorder</h1>
+    <p class="subtitle">跨平台音訊錄音庫 - 瀏覽器範例</p>
+    
+    <div class="info-box">
+      <h3>📋 使用說明</h3>
+      <ul>
+        <li><strong>首次使用請點擊下方「啟動音訊系統」按鈕</strong>（瀏覽器安全要求）</li>
+        <li>允許瀏覽器存取麥克風權限</li>
+        <li>點擊「開始錄音」按鈕開始錄製音訊</li>
+        <li>即時查看波形和音量表</li>
+        <li>點擊「停止錄音」結束錄製</li>
+        <li>使用播放控制按鈕播放錄音</li>
+      </ul>
+    </div>
+    
+    <!-- 啟動按鈕 -->
+    <div style="text-align: center; margin-bottom: 20px;">
+      <button id="init-button" style="
+        font-size: 18px;
+        padding: 15px 40px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 600;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        transition: all 0.3s ease;
+      " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.6)'" 
+         onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(102, 126, 234, 0.4)'">
+        🎤 啟動音訊系統
+      </button>
+    </div>
+    
+    <!-- VoiceBank Recorder UI 將在這裡渲染 -->
+    <div id="voicebank-container" style="display: none;">
+      <!-- 錄音控制按鈕 -->
+      <div class="recorder-controls">
+        <button id="btn-record" class="btn-record">🎙️ 開始錄音</button>
+        <button id="btn-stop" class="btn-stop" disabled>⏹️ 停止錄音</button>
+      </div>
+      
+      <!-- 波形顯示區域 -->
+      <div class="waveforms">
+        <div style="margin-bottom: 20px;">
+          <h4 style="color: #667eea; margin-bottom: 10px;">即時波形</h4>
+          <canvas id="vbr-live-waveform" width="800" height="120" style="border: 2px solid #e5e7eb; border-radius: 8px; background: #f9fafb; display: block; width: 100%;"></canvas>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+          <h4 style="color: #667eea; margin-bottom: 10px;">音量表 (VU Meter)</h4>
+          <canvas id="vbr-vu-meter" width="800" height="50" style="border: 2px solid #e5e7eb; border-radius: 8px; background: #f9fafb; display: block; width: 100%;"></canvas>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+          <h4 style="color: #667eea; margin-bottom: 10px;">累積波形 <span style="font-size: 12px; font-weight: normal; color: #888;">（可拖曳平移、滾輪縮放、點擊定位）</span></h4>
+          <canvas id="vbr-accumulated-waveform" width="800" height="200" style="border: 2px solid #e5e7eb; border-radius: 8px; background: #f9fafb; display: block; width: 100%;"></canvas>
+          <!-- 累積波形工具列 -->
+          <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <button id="btn-zoom-in" class="toolbar-btn" disabled>放大 +</button>
+            <button id="btn-zoom-out" class="toolbar-btn" disabled>縮小 −</button>
+            <button id="btn-zoom-reset" class="toolbar-btn" disabled>重置視圖</button>
+            <button id="btn-pan-left" class="toolbar-btn" disabled>← 向左</button>
+            <button id="btn-pan-right" class="toolbar-btn" disabled>向右 →</button>
+            <label style="margin-left: auto; display: flex; align-items: center; gap: 5px;">
+              <input type="checkbox" id="chk-auto-scroll" checked>
+              <span style="font-size: 13px;">自動捲動</span>
+            </label>
+          </div>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+          <h4 style="color: #667eea; margin-bottom: 10px;">概覽波形 <span style="font-size: 12px; font-weight: normal; color: #888;">（點擊或拖曳可快速導航）</span></h4>
+          <canvas id="vbr-overview-waveform" width="800" height="80" style="border: 2px solid #e5e7eb; border-radius: 8px; background: #f9fafb; display: block; width: 100%;"></canvas>
+        </div>
+      </div>
+      
+      <!-- 進階設定面板 -->
+      <details style="margin: 20px 0; padding: 15px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <summary style="cursor: pointer; font-weight: 600; color: #667eea; padding: 5px;">⚙️ 進階設定</summary>
+        <div style="margin-top: 15px; display: grid; gap: 15px;">
+          <!-- 裝置選擇 -->
+          <div>
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">🎤 輸入裝置（麥克風）</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <select id="mic-select" style="flex: 1; padding: 8px; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 14px;" disabled>
+                <option>讀取裝置中...</option>
+              </select>
+              <button id="btn-refresh-mics" style="padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;" title="重新整理麥克風清單">🔄</button>
+            </div>
+            <small id="mic-hint" style="color: #666; display: block; margin-top: 5px;">選擇要使用的麥克風裝置</small>
+          </div>
+          
+          <div>
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">🔊 輸出裝置（揚聲器）</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <select id="spk-select" style="flex: 1; padding: 8px; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 14px;" disabled>
+                <option value="default">系統預設輸出</option>
+              </select>
+              <button id="btn-refresh-outputs" style="padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;" title="重新整理輸出裝置清單">🔄</button>
+            </div>
+            <small id="spk-hint" style="color: #666; display: block; margin-top: 5px;">部分瀏覽器需 HTTPS 才可切換輸出裝置</small>
+          </div>
+          
+          <!-- 麥克風增益 -->
+          <div>
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">前級增益 (Mic Gain)</label>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <input type="range" id="mic-gain-slider" min="1" max="6" step="0.1" value="1.0" style="flex: 1;">
+              <span id="mic-gain-value" style="min-width: 50px; font-weight: 600;">1.0x</span>
+            </div>
+            <small style="color: #666;">可改善音量偏小問題（建議在錄音前調整）</small>
+          </div>
+          
+          <!-- 音訊設定 -->
+          <div>
+            <label style="display: block; margin-bottom: 10px; font-weight: 500;">音訊處理</label>
+            <div style="display: flex; flex-wrap: wrap; gap: 15px;">
+              <label style="display: flex; align-items: center; gap: 5px;">
+                <input type="checkbox" id="chk-agc">
+                <span>自動增益控制 (AGC)</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 5px;">
+                <input type="checkbox" id="chk-echo-cancel">
+                <span>回音消除</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 5px;">
+                <input type="checkbox" id="chk-noise-suppress">
+                <span>噪音抑制</span>
+              </label>
+            </div>
+            <small style="color: #666;">這些選項需要在初始化前設定（重新啟動音訊系統後生效）</small>
+          </div>
+          
+          <!-- 錄音資訊 -->
+          <div id="recording-info" style="display: none;">
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">錄音資訊</label>
+            <div style="background: white; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 13px;">
+              <div>時長：<span id="info-duration">00:00.000</span></div>
+              <div>樣本數：<span id="info-samples">0</span></div>
+              <div>採樣率：<span id="info-samplerate">48000</span> Hz</div>
+              <div>檔案大小：<span id="info-filesize">0</span> KB</div>
+            </div>
+          </div>
+        </div>
+      </details>
+      
+      <!-- 播放控制 -->
+      <div class="playback-controls">
+        <button id="btn-play" disabled>▶ 播放</button>
+        <button id="btn-pause" disabled>⏸ 暫停</button>
+        <button id="btn-download" class="btn-download" disabled>💾 下載錄音</button>
+      </div>
+    </div>
+    
+    <!-- 狀態日誌 -->
+    <div class="status-log" id="status-log">
+      <div class="log-entry">
+        <span class="log-time">[00:00:00]</span>
+        <span class="log-info">📊 準備初始化 VoiceBank Recorder...</span>
+      </div>
+    </div>
+    
+    <footer>
+      <p>
+        Built with ❤️ using 
+        <a href="https://github.com/cychiang-ntpu/simple-recordrtc-example" target="_blank">VoiceBank Recorder</a>
+      </p>
+      <p>支援平台：Browser | Electron | Capacitor</p>
+    </footer>
+  </div>
+  
+  <!-- 載入 RecordRTC 依賴（從 vendor 目錄）-->
+  <script src="../../dist/vendor/RecordRTC.js"></script>
+  
+  <!-- 載入建置後的 VoiceBank Recorder 庫 -->
+  <script src="../../dist/voicebank-recorder.min.js"></script>
+  
+  <script>
+    // 日誌函數
+    const logContainer = document.getElementById('status-log');
+    
+    function log(message, type = 'info') {
+      const time = new Date().toLocaleTimeString('zh-TW');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `
+        <span class="log-time">[${time}]</span>
+        <span class="log-${type}">${message}</span>
+      `;
+      logContainer.appendChild(entry);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+    
+    // 全局變數
+    let audioEngine = null;
+    let waveformRenderer = null;
+    let recorderUI = null;
+    let isInitialized = false;
+    
+    // 初始化 VoiceBank Recorder
+    async function initRecorder() {
+      try {
+        // 隱藏啟動按鈕
+        const initButton = document.getElementById('init-button');
+        if (initButton) {
+          initButton.disabled = true;
+          initButton.textContent = '⏳ 正在初始化...';
+        }
+        
+        log('🔍 檢查 VoiceBankRecorder 庫...', 'info');
+        
+        if (typeof VoiceBankRecorder === 'undefined') {
+          log('❌ VoiceBankRecorder 未載入！', 'error');
+          return;
+        }
+        
+        log('✓ VoiceBankRecorder 已載入', 'info');
+        log(`✓ 可用模組: ${Object.keys(VoiceBankRecorder).join(', ')}`, 'info');
+        
+        log(' 創建 AudioEngine...', 'info');
+        
+        // 創建 AudioEngine 實例
+        audioEngine = new VoiceBankRecorder.AudioEngine({
+          audioWorklet: false,  // 暫時禁用 AudioWorklet 以簡化測試
+          sampleRate: 48000,
+          channelCount: 1
+        });
+        
+        log('✓ AudioEngine 創建成功', 'info');
+        
+        log('🔧 初始化 AudioEngine...', 'info');
+        
+        // 初始化 AudioEngine
+        await audioEngine.initialize();
+        
+        log('✓ AudioEngine 初始化完成', 'info');
+        
+        log('🎨 初始化 WaveformRenderer...', 'info');
+        
+        // 檢查 Canvas 元素
+        const liveCanvas = document.getElementById('vbr-live-waveform');
+        const vuMeterCanvas = document.getElementById('vbr-vu-meter');
+        const accumulatedCanvas = document.getElementById('vbr-accumulated-waveform');
+        const overviewCanvas = document.getElementById('vbr-overview-waveform');
+        
+        log(`✓ Canvas 元素檢查: live=${!!liveCanvas}, vu=${!!vuMeterCanvas}, acc=${!!accumulatedCanvas}, overview=${!!overviewCanvas}`, 'info');
+        
+        if (!liveCanvas || !vuMeterCanvas || !accumulatedCanvas || !overviewCanvas) {
+          log('❌ 部分 Canvas 元素未找到！', 'error');
+          console.error('Canvas elements:', { liveCanvas, vuMeterCanvas, accumulatedCanvas, overviewCanvas });
+        }
+        
+        // 創建 WaveformRenderer 實例
+        waveformRenderer = new VoiceBankRecorder.WaveformRenderer({
+          liveCanvas: liveCanvas,
+          vuMeterCanvas: vuMeterCanvas,
+          accumulatedCanvas: accumulatedCanvas,
+          overviewCanvas: overviewCanvas,
+          audioEngine: audioEngine,
+          useWorker: false  // 暫時不使用 Worker
+        });
+        
+        log('✓ WaveformRenderer 創建成功', 'info');
+        
+        log('🎨 初始化 WaveformRenderer 組件...', 'info');
+        
+        // 初始化 WaveformRenderer（這會創建各個波形組件）
+        await waveformRenderer.initialize();
+        
+        log('✓ WaveformRenderer 初始化完成', 'info');
+        
+        // 設置按鈕事件
+        setupButtons();
+        
+        log('✅ VoiceBank Recorder 初始化完成！', 'info');
+        log('👉 點擊「開始錄音」按鈕開始錄製', 'info');
+        
+        // 顯示 UI 容器
+        document.getElementById('voicebank-container').style.display = 'block';
+        
+        // 隱藏啟動按鈕
+        if (initButton) {
+          initButton.style.display = 'none';
+        }
+        
+        isInitialized = true;
+        
+        // 將實例保存到全局（方便除錯）
+        window.recorderUI = recorderUI;
+        window.audioEngine = audioEngine;
+        window.waveformRenderer = waveformRenderer;
+        
+      } catch (error) {
+        log(`❌ 初始化失敗: ${error.message}`, 'error');
+        console.error('Initialization error:', error);
+        console.error('Error stack:', error.stack);
+        
+        // 恢復啟動按鈕
+        const initButton = document.getElementById('init-button');
+        if (initButton) {
+          initButton.disabled = false;
+          initButton.textContent = '🎤 啟動音訊系統（重試）';
+        }
+      }
+    }
+    
+    // 設置按鈕事件
+    function setupButtons() {
+      const btnRecord = document.getElementById('btn-record');
+      const btnStop = document.getElementById('btn-stop');
+      const btnPlay = document.getElementById('btn-play');
+      const btnPause = document.getElementById('btn-pause');
+      const btnDownload = document.getElementById('btn-download');
+      
+      // 波形工具列按鈕
+      const btnZoomIn = document.getElementById('btn-zoom-in');
+      const btnZoomOut = document.getElementById('btn-zoom-out');
+      const btnZoomReset = document.getElementById('btn-zoom-reset');
+      const btnPanLeft = document.getElementById('btn-pan-left');
+      const btnPanRight = document.getElementById('btn-pan-right');
+      const chkAutoScroll = document.getElementById('chk-auto-scroll');
+      
+      // Mic Gain 滑桿
+      const micGainSlider = document.getElementById('mic-gain-slider');
+      const micGainValue = document.getElementById('mic-gain-value');
+      
+      // Mic Gain 調整
+      micGainSlider.addEventListener('input', (e) => {
+        const gain = parseFloat(e.target.value);
+        micGainValue.textContent = gain.toFixed(1) + 'x';
+        if (audioEngine && audioEngine.setMicGain) {
+          audioEngine.setMicGain(gain);
+          log(`🎚️ 增益調整為 ${gain.toFixed(1)}x`, 'info');
+        }
+      });
+      
+      // 縮放控制
+      btnZoomIn.addEventListener('click', () => {
+        if (waveformRenderer && waveformRenderer.accumulatedWaveform) {
+          waveformRenderer.accumulatedWaveform.zoomBySteps(1, 0.5);
+          log('🔍 放大波形', 'info');
+        }
+      });
+      
+      btnZoomOut.addEventListener('click', () => {
+        if (waveformRenderer && waveformRenderer.accumulatedWaveform) {
+          waveformRenderer.accumulatedWaveform.zoomBySteps(-1, 0.5);
+          log('🔍 縮小波形', 'info');
+        }
+      });
+      
+      btnZoomReset.addEventListener('click', () => {
+        if (waveformRenderer && waveformRenderer.accumulatedWaveform) {
+          waveformRenderer.accumulatedWaveform.setZoom(1);
+          waveformRenderer.accumulatedWaveform.isAutoScroll = true;
+          chkAutoScroll.checked = true;
+          log('🔄 重置視圖', 'info');
+        }
+      });
+      
+      // 平移控制
+      btnPanLeft.addEventListener('click', () => {
+        if (waveformRenderer && waveformRenderer.accumulatedWaveform) {
+          const info = waveformRenderer.accumulatedWaveform.getVisibleSamples();
+          waveformRenderer.accumulatedWaveform.panBySamples(-Math.floor(info.visible * 0.2));
+          log('◀ 向左移動', 'info');
+        }
+      });
+      
+      btnPanRight.addEventListener('click', () => {
+        if (waveformRenderer && waveformRenderer.accumulatedWaveform) {
+          const info = waveformRenderer.accumulatedWaveform.getVisibleSamples();
+          waveformRenderer.accumulatedWaveform.panBySamples(Math.floor(info.visible * 0.2));
+          log('▶ 向右移動', 'info');
+        }
+      });
+      
+      // 自動捲動開關
+      chkAutoScroll.addEventListener('change', (e) => {
+        if (waveformRenderer && waveformRenderer.accumulatedWaveform) {
+          waveformRenderer.accumulatedWaveform.isAutoScroll = e.target.checked;
+          log(e.target.checked ? '✓ 啟用自動捲動' : '✗ 停用自動捲動', 'info');
+        }
+      });
+      
+      // 開始錄音
+      btnRecord.addEventListener('click', async () => {
+        try {
+          log('🎙️ 開始錄音...', 'info');
+          
+          // DeviceManager 已經整合到 AudioEngine 中，會自動使用選擇的麥克風
+          // 不需要手動設置 deviceId
+          
+          await audioEngine.startRecording();
+          btnRecord.disabled = true;
+          btnStop.disabled = false;
+          log('✓ 錄音已開始', 'info');
+        } catch (error) {
+          log(`❌ 錄音失敗: ${error.message}`, 'error');
+          console.error('Recording Error:', error);
+        }
+      });
+      
+      // 停止錄音
+      btnStop.addEventListener('click', async () => {
+        try {
+          log('⏹️ 停止錄音...', 'info');
+          const blob = await audioEngine.stopRecording();
+          btnRecord.disabled = false;
+          btnStop.disabled = true;
+          btnPlay.disabled = false;
+          
+          // 啟用波形工具列按鈕
+          btnZoomIn.disabled = false;
+          btnZoomOut.disabled = false;
+          btnZoomReset.disabled = false;
+          btnPanLeft.disabled = false;
+          btnPanRight.disabled = false;
+          btnDownload.disabled = false;
+          
+          log(`✓ 錄音已停止 - ${(blob.size / 1024).toFixed(2)} KB`, 'info');
+          
+          // 更新錄音資訊
+          const recordingInfo = document.getElementById('recording-info');
+          const duration = (audioEngine.recordStopTime - audioEngine.recordStartTime) / 1000;
+          const samples = audioEngine.pcmTotalSamples || 0;
+          const sampleRate = audioEngine.audioContext.sampleRate;
+          
+          document.getElementById('info-duration').textContent = formatDuration(duration);
+          document.getElementById('info-samples').textContent = samples.toLocaleString();
+          document.getElementById('info-samplerate').textContent = sampleRate.toLocaleString();
+          document.getElementById('info-filesize').textContent = (blob.size / 1024).toFixed(2);
+          recordingInfo.style.display = 'block';
+          
+          // 清理舊的音訊資源
+          if (audioPlayer) {
+            audioPlayer.pause();
+            audioPlayer.src = '';
+            audioPlayer = null;
+            log('🗑️ 已清理舊的播放器', 'info');
+          }
+          if (window.recordedUrl) {
+            URL.revokeObjectURL(window.recordedUrl);
+            log('🗑️ 已釋放舊的音訊 URL', 'info');
+          }
+          
+          // 保存新的 blob 以便播放
+          window.recordedBlob = blob;
+          window.recordedUrl = URL.createObjectURL(blob);
+          log('💾 新的錄音已準備播放', 'success');
+        } catch (error) {
+          log(`❌ 停止失敗: ${error.message}`, 'error');
+          console.error('Stop Error:', error);
+        }
+      });
+      
+      // 播放錄音
+      let audioPlayer = null;
+      
+      btnPlay.addEventListener('click', async () => {
+        try {
+          if (!window.recordedUrl) {
+            log('❌ 沒有可播放的錄音', 'error');
+            return;
+          }
+          
+          log('▶️ 播放錄音...', 'info');
+          
+          // 每次播放都重新創建音訊播放器，確保使用最新的錄音
+          if (audioPlayer) {
+            audioPlayer.pause();
+            audioPlayer.src = '';
+            audioPlayer = null;
+          }
+          
+          audioPlayer = new Audio(window.recordedUrl);
+          
+          // 設置事件監聽器
+          audioPlayer.addEventListener('ended', () => {
+            btnPlay.disabled = false;
+            btnPause.disabled = true;
+            log('✓ 播放完成', 'info');
+          });
+          
+          // 使用 DeviceManager 設置輸出裝置
+          if (deviceManager) {
+            try {
+              await deviceManager.setAudioOutputDevice(audioPlayer);
+              const selectedOutput = deviceManager.getSelectedOutputDevice();
+              const outputName = selectedOutput ? selectedOutput.label : '系統預設';
+              log(`🔊 使用輸出裝置: ${outputName}`, 'info');
+            } catch (err) {
+              console.warn('設置輸出裝置失敗:', err);
+              log('⚠️ 設置輸出裝置失敗，使用預設輸出', 'warning');
+            }
+          }
+          
+          audioPlayer.play();
+          btnPlay.disabled = true;
+          btnPause.disabled = false;
+          log('✓ 播放中', 'info');
+        } catch (error) {
+          log(`❌ 播放失敗: ${error.message}`, 'error');
+          console.error('Play Error:', error);
+        }
+      });
+      
+      // 暫停播放
+      btnPause.addEventListener('click', () => {
+        try {
+          if (!audioPlayer) {
+            log('❌ 沒有正在播放的音訊', 'error');
+            return;
+          }
+          
+          log('⏸️ 暫停播放...', 'info');
+          audioPlayer.pause();
+          btnPlay.disabled = false;
+          btnPause.disabled = true;
+          log('✓ 已暫停', 'info');
+        } catch (error) {
+          log(`❌ 暫停失敗: ${error.message}`, 'error');
+          console.error('Pause Error:', error);
+        }
+      });
+      
+      // 下載錄音
+      btnDownload.addEventListener('click', () => {
+        try {
+          if (!window.recordedBlob) {
+            log('❌ 沒有可下載的錄音', 'error');
+            return;
+          }
+          
+          const now = new Date();
+          const timestamp = now.getFullYear() + 
+                          String(now.getMonth() + 1).padStart(2, '0') + 
+                          String(now.getDate()).padStart(2, '0') + '_' +
+                          String(now.getHours()).padStart(2, '0') + 
+                          String(now.getMinutes()).padStart(2, '0') + 
+                          String(now.getSeconds()).padStart(2, '0');
+          const filename = `voicebank_recording_${timestamp}.wav`;
+          
+          const url = window.recordedUrl;
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          
+          log(`💾 已下載: ${filename}`, 'info');
+        } catch (error) {
+          log(`❌ 下載失敗: ${error.message}`, 'error');
+          console.error('Download Error:', error);
+        }
+      });
+    }
+    
+    // ============================================================
+    // 裝置管理（使用 DeviceManager API）
+    // ============================================================
+    
+    // 使用 AudioEngine 內建的 DeviceManager
+    let deviceManager = null;
+    
+    // 列舉麥克風裝置
+    async function populateMicDevices() {
+      if (!deviceManager) return;
+      
+      const micSelect = document.getElementById('mic-select');
+      const micHint = document.getElementById('mic-hint');
+      
+      if (!deviceManager.isSupported()) {
+        micSelect.innerHTML = '<option>此瀏覽器不支援裝置列舉</option>';
+        micSelect.disabled = true;
+        micHint.textContent = '您的瀏覽器不支援列舉裝置';
+        return;
+      }
+      
+      try {
+        // 使用 DeviceManager 列舉麥克風
+        const microphones = await deviceManager.enumerateMicrophones();
+        
+        micSelect.innerHTML = '';
+        
+        if (microphones.length === 0) {
+          micSelect.innerHTML = '<option>未偵測到麥克風</option>';
+          micSelect.disabled = true;
+          micHint.textContent = '請確認麥克風已連接並授予權限';
+          return;
+        }
+        
+        micSelect.disabled = false;
+        
+        microphones.forEach((device, index) => {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.textContent = device.label || `麥克風 ${index + 1}`;
+          micSelect.appendChild(option);
+        });
+        
+        // 恢復上次選擇
+        const savedId = deviceManager.getSelectedMicrophoneId();
+        log(`💾 從 localStorage 讀取的麥克風 ID: ${savedId || '(無)'}`, 'info');
+        
+        if (savedId && deviceManager.isDeviceAvailable(savedId, 'microphone')) {
+          // 上次的裝置仍然可用
+          micSelect.value = savedId;
+          const deviceLabel = micSelect.options[micSelect.selectedIndex].text;
+          log(`✅ 恢復上次選擇的麥克風: ${deviceLabel} (${savedId})`, 'success');
+        } else {
+          // 上次的裝置不可用或沒有儲存的選擇
+          if (savedId) {
+            log(`⚠️ 上次選擇的麥克風 ${savedId} 已不可用`, 'warning');
+          }
+          
+          if (microphones.length > 0) {
+            // 選擇第一個可用的麥克風，並更新 DeviceManager
+            const firstDeviceId = microphones[0].deviceId;
+            deviceManager.selectMicrophone(firstDeviceId, true); // 儲存到 localStorage
+            micSelect.value = firstDeviceId;
+            log(`🎤 選擇預設麥克風: ${microphones[0].label} (${firstDeviceId})`, 'info');
+          }
+        }
+        
+        micHint.textContent = `找到 ${microphones.length} 個麥克風裝置`;
+        log(`📊 已列舉 ${microphones.length} 個麥克風裝置`, 'info');
+      } catch (error) {
+        console.error('列舉麥克風失敗:', error);
+        micSelect.innerHTML = '<option>需要麥克風權限</option>';
+        micSelect.disabled = true;
+        micHint.textContent = '請授予麥克風權限後重新整理';
+        log('❌ 列舉麥克風失敗: ' + error.message, 'error');
+      }
+    }
+    
+    // 列舉輸出裝置
+    async function populateOutputDevices() {
+      if (!deviceManager) return;
+      
+      const spkSelect = document.getElementById('spk-select');
+      const spkHint = document.getElementById('spk-hint');
+      
+      if (!deviceManager.isSupported()) {
+        spkSelect.innerHTML = '<option value="default">系統預設輸出</option>';
+        spkSelect.disabled = true;
+        spkHint.textContent = '此瀏覽器不支援輸出裝置切換';
+        return;
+      }
+      
+      try {
+        // 使用 DeviceManager 列舉輸出裝置
+        const outputs = await deviceManager.enumerateOutputDevices();
+        
+        spkSelect.innerHTML = '<option value="default">系統預設輸出</option>';
+        
+        if (outputs.length === 0) {
+          spkSelect.disabled = true;
+          spkHint.textContent = '未偵測到輸出裝置或瀏覽器不支援';
+          return;
+        }
+        
+        spkSelect.disabled = false;
+        
+        outputs.forEach((device, index) => {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.textContent = device.label || `揚聲器 ${index + 1}`;
+          spkSelect.appendChild(option);
+        });
+        
+        // 恢復上次選擇
+        const selectedId = deviceManager.getSelectedOutputDeviceId();
+        if (selectedId) {
+          spkSelect.value = selectedId;
+        }
+        
+        spkHint.textContent = `找到 ${outputs.length} 個輸出裝置`;
+        log(`🔊 已列舉 ${outputs.length} 個輸出裝置`, 'info');
+      } catch (error) {
+        console.error('列舉輸出裝置失敗:', error);
+        spkHint.textContent = '列舉輸出裝置失敗';
+        log('❌ 列舉輸出裝置失敗: ' + error.message, 'error');
+      }
+    }
+    
+    // 設置裝置選擇事件監聽器
+    function setupDeviceListeners() {
+      if (!deviceManager) return;
+      
+      const micSelect = document.getElementById('mic-select');
+      const spkSelect = document.getElementById('spk-select');
+      const btnRefreshMics = document.getElementById('btn-refresh-mics');
+      const btnRefreshOutputs = document.getElementById('btn-refresh-outputs');
+      
+      // 麥克風選擇變更
+      if (micSelect) {
+        micSelect.addEventListener('change', (e) => {
+          const deviceId = e.target.value;
+          const deviceLabel = e.target.options[e.target.selectedIndex].text;
+          
+          deviceManager.selectMicrophone(deviceId);
+          
+          log(`🎤 已選擇麥克風: ${deviceLabel}`, 'info');
+          log(`📍 裝置 ID: ${deviceId}`, 'info');
+          log('⚠️ 請重新啟動錄音以套用新的麥克風設定', 'warning');
+          
+          // 驗證選擇是否成功
+          const selectedId = deviceManager.getSelectedMicrophoneId();
+          if (selectedId === deviceId) {
+            log(`✓ DeviceManager 已確認選擇: ${selectedId}`, 'info');
+          } else {
+            log(`❌ DeviceManager 選擇失敗！預期: ${deviceId}, 實際: ${selectedId}`, 'error');
+          }
+        });
+      }
+      
+      // 輸出裝置選擇變更
+      if (spkSelect) {
+        spkSelect.addEventListener('change', (e) => {
+          deviceManager.selectOutputDevice(e.target.value);
+          log(`🔊 已設定輸出裝置: ${e.target.value === 'default' ? '系統預設' : e.target.options[e.target.selectedIndex].text}`, 'info');
+        });
+      }
+      
+      // 重新整理麥克風清單
+      if (btnRefreshMics) {
+        btnRefreshMics.addEventListener('click', () => {
+          log('🔄 重新整理麥克風清單...', 'info');
+          populateMicDevices();
+        });
+      }
+      
+      // 重新整理輸出裝置清單
+      if (btnRefreshOutputs) {
+        btnRefreshOutputs.addEventListener('click', () => {
+          log('🔄 重新整理輸出裝置清單...', 'info');
+          populateOutputDevices();
+        });
+      }
+      
+      // 監聽裝置變更事件（使用 DeviceManager 的事件系統）
+      deviceManager.on('devicechange', ({ microphones, outputs }) => {
+        log('🔌 偵測到裝置變更，自動更新清單', 'info');
+        populateMicDevices();
+        populateOutputDevices();
+      });
+      
+      // 啟動裝置變更監聽
+      deviceManager.startDeviceChangeMonitoring();
+    }
+    
+    // 在初始化完成後列舉裝置
+    async function initializeDevices() {
+      if (!audioEngine || !audioEngine.deviceManager) {
+        log('❌ DeviceManager 尚未初始化', 'error');
+        return;
+      }
+      
+      // 取得 AudioEngine 內建的 DeviceManager
+      deviceManager = audioEngine.deviceManager;
+      
+      log('🔍 正在列舉音訊裝置...', 'info');
+      await populateMicDevices();
+      await populateOutputDevices();
+      setupDeviceListeners();
+    }
+    
+    // 修改 initRecorder 函數，在初始化完成後列舉裝置
+    const originalInitRecorder = initRecorder;
+    initRecorder = async function() {
+      await originalInitRecorder();
+      if (isInitialized) {
+        await initializeDevices();
+      }
+    };
+    
+    // 格式化時間為 MM:SS.mmm
+    function formatDuration(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      const ms = Math.floor((seconds % 1) * 1000);
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+    }
+    
+    // 頁面載入後設置按鈕事件
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setupInitButton);
+    } else {
+      setupInitButton();
+    }
+    
+    function setupInitButton() {
+      const initButton = document.getElementById('init-button');
+      if (initButton) {
+        initButton.addEventListener('click', initRecorder);
+        log('📊 準備就緒，請點擊「啟動音訊系統」按鈕開始', 'info');
+      }
+    }
+  </script>
+</body>
+</html>

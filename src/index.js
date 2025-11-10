@@ -13,7 +13,7 @@ export { WaveformRenderer } from './core/WaveformRenderer.js';
 export { DeviceManager } from './core/DeviceManager.js';
 
 // 匯出 UI 模組
-export { RecorderUI } from './ui/RecorderUI.js';
+export { VoiceBankRecorderUI } from './ui/VoiceBankRecorderUI.js';
 
 // 匯出儲存模組
 export {

@@ -559,10 +559,17 @@
         }
         try {
           // 創建 AudioContext
+          // 注意：不指定 sampleRate，讓 AudioContext 使用硬體預設值
+          // 這樣可以避免 "different sample-rate" 錯誤
           const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-          this.audioContext = new AudioContextClass({
-            sampleRate: this.config.sampleRate
-          });
+          this.audioContext = new AudioContextClass();
+
+          // 記錄實際使用的採樣率
+          console.log(`[AudioEngine] AudioContext 採樣率: ${this.audioContext.sampleRate} Hz`);
+          console.log(`[AudioEngine] 配置要求的採樣率: ${this.config.sampleRate} Hz`);
+          if (this.audioContext.sampleRate !== this.config.sampleRate) {
+            console.warn(`[AudioEngine] 注意：實際採樣率 (${this.audioContext.sampleRate}) 與配置 (${this.config.sampleRate}) 不同`);
+          }
 
           // 創建分析器節點
           this.analyser = this.audioContext.createAnalyser();
@@ -2565,20 +2572,57 @@
       _setupMouseInteraction() {
         if (!this.canvas) return;
         let isDragging = false;
+        let dragClickedSample = 0; // 記錄點擊位置對應的絕對樣本位置
+        let dragVisibleSamples = 0; // 記錄拖曳開始時的可視範圍大小
 
         // 滑鼠按下 - 點擊或開始拖曳
         this.canvas.addEventListener('mousedown', e => {
           const acc = this.accumulatedWaveform;
           if (!acc || acc.sampleCount === 0) return;
           isDragging = true;
-          this._handleSeek(e.offsetX);
+          e.offsetX;
+          acc.viewStart;
+
+          // 記錄拖曳開始時的狀態
+          const total = acc.sampleCount;
+          const info = acc.getVisibleSamples();
+          dragVisibleSamples = info.visible;
+
+          // 計算點擊位置在可視範圍指示器內的偏移
+          // 使用與繪製時相同的座標映射邏輯
+          const viewStartX = Math.floor(info.start / total * this.width);
+          const offsetInView = e.offsetX - viewStartX;
+          dragClickedSample = offsetInView; // 記錄在可視範圍內的像素偏移
+
           this.canvas.style.cursor = 'grabbing';
         });
 
         // 滑鼠移動 - 拖曳更新
         this.canvas.addEventListener('mousemove', e => {
           if (!isDragging) return;
-          this._handleSeek(e.offsetX);
+          const acc = this.accumulatedWaveform;
+          if (!acc || acc.sampleCount === 0) return;
+          const total = acc.sampleCount;
+
+          // 計算新的可視範圍起始位置（像素）
+          // 保持滑鼠在可視範圍內的相對位置不變
+          const targetViewStartX = e.offsetX - dragClickedSample;
+
+          // 像素 → 樣本（使用反向映射）
+          const newViewStart = Math.floor(targetViewStartX / this.width * total);
+
+          // 確保 viewStart 在有效範圍內
+          const maxViewStart = Math.max(0, total - dragVisibleSamples);
+          const clampedViewStart = Math.max(0, Math.min(maxViewStart, newViewStart));
+
+          // 更新視圖
+          acc.viewStart = clampedViewStart;
+          acc.isAutoScroll = false;
+          acc._enforceViewBounds();
+          acc.draw();
+
+          // 重繪 overview
+          this.draw();
         });
 
         // 滑鼠放開
@@ -2610,10 +2654,34 @@
         const clickRatio = Math.max(0, Math.min(1, clickX / this.width));
         const targetSample = Math.floor(clickRatio * total);
 
+        // 獲取當前縮放級別下的可見樣本數
+        // 注意：這裡我們需要在設置 viewStart 之前就知道可見範圍
+        const currentZoom = acc.zoomFactor;
+        const minVis = acc._getMinVisibleSamples(total);
+        let visibleSamples = Math.max(minVis, Math.round(total / currentZoom));
+        if (visibleSamples > total) visibleSamples = total;
+
+        // 計算新的 viewStart，讓 targetSample 位於可見範圍的中心
+        const halfVisible = Math.floor(visibleSamples / 2);
+        let newViewStart = targetSample - halfVisible;
+
+        // 確保 viewStart 在有效範圍內
+        const maxViewStart = Math.max(0, total - visibleSamples);
+        newViewStart = Math.max(0, Math.min(maxViewStart, newViewStart));
+        console.log('🎯 OverviewWaveform 導航:', {
+          clickX,
+          clickRatio: clickRatio.toFixed(3),
+          targetSample,
+          total,
+          visibleSamples,
+          halfVisible,
+          newViewStart,
+          maxViewStart,
+          zoomFactor: currentZoom
+        });
+
         // 更新 accumulated waveform 的視圖位置
-        const info = acc.getVisibleSamples();
-        const halfVisible = Math.floor(info.visible / 2);
-        acc.viewStart = Math.max(0, Math.min(total - info.visible, targetSample - halfVisible));
+        acc.viewStart = newViewStart;
         acc.isAutoScroll = false;
         acc._enforceViewBounds();
         acc.draw();
@@ -2712,670 +2780,1202 @@
     }
 
     /**
-     * RecorderUI.js
-     * VoiceBank Recorder 主 UI 控制器
+     * VoiceBankRecorderUI.js
+     * 完整的錄音器 UI 組件 - 包含所有界面元素和交互邏輯
      * 
-     * 職責：
-     * - 管理所有 UI 元素和狀態
-     * - 協調 AudioEngine 和 WaveformRenderer
-     * - 處理用戶交互事件
-     * - 更新 UI 顯示
-     * 
-     * @module RecorderUI
-     * @requires AudioEngine
-     * @requires WaveformRenderer
+     * @module VoiceBankRecorderUI
+     * @description 提供開箱即用的錄音器界面，包含：
+     * - 自動生成 UI (HTML + CSS)
+     * - 錄音控制按鈕
+     * - 波形顯示 (即時、累積、概覽、VU Meter)
+     * - 裝置管理 (麥克風、輸出裝置)
+     * - 音訊處理選項 (增益、AGC、回音消除、降噪)
+     * - 播放控制
+     * - 狀態日誌
      */
 
+
     /**
-     * RecorderUI 類 - 主 UI 控制器
+     * VoiceBankRecorderUI - 完整的錄音器 UI 組件
      */
-    class RecorderUI {
+    class VoiceBankRecorderUI {
       /**
-       * 建構函數
-       * @param {string|HTMLElement} container - 容器選擇器或元素
        * @param {Object} options - 配置選項
-       * @param {AudioEngine} options.audioEngine - 音訊引擎實例
-       * @param {WaveformRenderer} options.waveformRenderer - 波形渲染器實例
-       * @param {Object} options.callbacks - 回調函數
+       * @param {HTMLElement|string} options.container - 容器元素或選擇器
+       * @param {Object} [options.theme] - 主題配置
+       * @param {boolean} [options.showAdvancedOptions=true] - 是否顯示進階選項
+       * @param {boolean} [options.showStatusLog=true] - 是否顯示狀態日誌
+       * @param {Object} [options.audioConfig] - AudioEngine 配置
+       * @param {Object} [options.waveformConfig] - WaveformRenderer 配置
        */
-      constructor(container, options = {}) {
-        // 容器元素
-        this.container = typeof container === 'string' ? document.querySelector(container) : container;
+      constructor(options = {}) {
+        this.options = {
+          showAdvancedOptions: true,
+          showStatusLog: true,
+          theme: {
+            primaryColor: '#667eea',
+            secondaryColor: '#764ba2',
+            successColor: '#10b981',
+            errorColor: '#ef4444',
+            warningColor: '#f59e0b'
+          },
+          ...options
+        };
+
+        // 獲取容器
+        if (typeof options.container === 'string') {
+          this.container = document.querySelector(options.container);
+        } else {
+          this.container = options.container;
+        }
         if (!this.container) {
           throw new Error('Container element not found');
         }
 
-        // 核心模組引用
-        this.audioEngine = options.audioEngine;
-        this.waveformRenderer = options.waveformRenderer;
+        // 核心組件
+        this.audioEngine = null;
+        this.waveformRenderer = null;
+        this.deviceManager = null;
 
-        // 配置選項
-        this.options = {
-          layout: options.layout || 'auto',
-          // 'horizontal', 'vertical', 'auto'
-          theme: options.theme || 'light',
-          // 'light', 'dark'
-          showOverview: options.showOverview !== false,
-          ...options
-        };
-
-        // 回調函數
-        this.callbacks = {
-          onRecordStart: options.onRecordStart || (() => {}),
-          onRecordStop: options.onRecordStop || (() => {}),
-          onPlayStart: options.onPlayStart || (() => {}),
-          onPlayStop: options.onPlayStop || (() => {}),
-          onError: options.onError || (error => console.error('UI Error:', error)),
-          ...options.callbacks
-        };
-
-        // UI 元素引用（初始化後填充）
+        // UI 元素引用
         this.elements = {};
 
-        // 狀態
-        this.state = {
-          isRecording: false,
-          isPlaying: false,
-          isPaused: false,
-          hasRecording: false,
-          duration: 0,
-          sampleCount: 0
-        };
+        // 播放器
+        this.audioPlayer = null;
+        this.recordedBlob = null;
+        this.recordedUrl = null;
 
-        // 子控制器（可選）
-        this.controlPanel = null;
-        this.playbackController = null;
-        this.layoutManager = null;
+        // 初始化狀態
+        this.isInitialized = false;
       }
 
       /**
-       * 初始化 UI
+       * 初始化 UI - 生成 HTML 和綁定事件
        */
       async initialize() {
-        try {
-          // 1. 渲染 UI 結構
-          this.renderUI();
-
-          // 2. 獲取 DOM 元素引用
-          this.cacheElements();
-
-          // 3. 綁定事件處理器
-          this.bindEvents();
-
-          // 4. 初始化子控制器（如果需要）
-          this.initializeSubControllers();
-
-          // 5. 應用初始設定
-          this.applyInitialSettings();
-
-          // 6. 連接核心模組事件
-          this.connectCoreModules();
-          console.log('✅ RecorderUI initialized');
-        } catch (error) {
-          this.callbacks.onError(error);
-          throw error;
+        if (this.isInitialized) {
+          console.warn('VoiceBankRecorderUI already initialized');
+          return;
         }
+
+        // 生成 UI
+        this._generateHTML();
+        this._injectStyles();
+        this._cacheElements();
+
+        // 初始化音訊引擎
+        await this._initializeAudioEngine();
+
+        // 初始化波形渲染器
+        await this._initializeWaveformRenderer();
+
+        // 綁定事件
+        this._bindEvents();
+
+        // 初始化裝置列表
+        await this._initializeDevices();
+        this.isInitialized = true;
+        this._log('✓ VoiceBank Recorder UI 初始化完成', 'success');
       }
 
       /**
-       * 渲染 UI 結構
-       * 注意：這是簡化版，實際應該從 public/index.html 提取完整 HTML
+       * 生成 HTML 結構
+       * @private
        */
-      renderUI() {
+      _generateHTML() {
         this.container.innerHTML = `
-      <div class="voicebank-recorder" data-layout="${this.options.layout}" data-theme="${this.options.theme}">
-        <!-- 控制面板 -->
-        <div class="recorder-controls">
-          <button id="vbr-btn-record" class="btn-record">
-            <span class="icon">●</span>
-            <span class="label">開始錄音</span>
-          </button>
-          
-          <div class="recording-info">
-            <span id="vbr-recording-duration">00:00.0</span>
-            <span id="vbr-sample-count">0 samples</span>
-          </div>
-        </div>
-        
-        <!-- 波形容器 -->
-        <div class="waveform-wrapper" id="vbr-waveform-wrapper">
-          <!-- 即時波形 -->
-          <div class="waveform-section">
-            <label>即時波形</label>
-            <canvas id="vbr-live-waveform" width="800" height="120"></canvas>
-          </div>
-          
-          <!-- VU Meter -->
-          <div class="waveform-section">
-            <label>音量表</label>
-            <canvas id="vbr-vu-meter" width="800" height="50"></canvas>
-          </div>
-          
-          <!-- 累積波形 -->
-          <div class="waveform-section">
-            <label>累積波形</label>
-            <canvas id="vbr-accumulated-waveform" width="800" height="200"></canvas>
-          </div>
-          
-          <!-- 概覽波形 -->
-          ${this.options.showOverview ? `
-          <div class="waveform-section">
-            <label>概覽波形</label>
-            <canvas id="vbr-overview-waveform" width="800" height="80"></canvas>
-          </div>
-          ` : ''}
-        </div>
-        
-        <!-- 播放控制 -->
-        <div class="playback-controls">
-          <button id="vbr-btn-play" class="btn-play" disabled>
-            <span class="icon">▶</span>
-            <span class="label">播放</span>
-          </button>
-          <button id="vbr-btn-pause" class="btn-pause" disabled>
-            <span class="icon">⏸</span>
-            <span class="label">暫停</span>
-          </button>
-          <button id="vbr-btn-stop" class="btn-stop" disabled>
-            <span class="icon">⏹</span>
-            <span class="label">停止</span>
-          </button>
-        </div>
-        
-        <!-- 工具列 -->
-        <div class="toolbar">
-          <button id="vbr-btn-save" class="btn-save" disabled>
-            <span class="icon">💾</span>
-            <span class="label">儲存</span>
-          </button>
-          <button id="vbr-btn-clear" class="btn-clear" disabled>
-            <span class="icon">🗑️</span>
-            <span class="label">清除</span>
-          </button>
-          <button id="vbr-btn-layout-toggle" class="btn-layout-toggle">
-            <span class="icon">🔄</span>
-            <span class="label">切換佈局</span>
-          </button>
-        </div>
-      </div>
-    `;
+            <div class="voicebank-recorder-ui">
+                <!-- 錄音控制按鈕 -->
+                <div class="vbr-controls">
+                    <button class="vbr-btn vbr-btn-record" data-action="record">
+                        <span class="vbr-icon">🎙️</span>
+                        <span class="vbr-text">開始錄音</span>
+                    </button>
+                    <button class="vbr-btn vbr-btn-stop" data-action="stop" disabled>
+                        <span class="vbr-icon">⏹️</span>
+                        <span class="vbr-text">停止錄音</span>
+                    </button>
+                </div>
+                
+                <!-- 波形顯示區 -->
+                <div class="vbr-waveforms">
+                    <!-- 即時波形 -->
+                    <div class="vbr-waveform-section">
+                        <h3 class="vbr-section-title">即時波形</h3>
+                        <canvas class="vbr-canvas" data-canvas="live" width="800" height="120"></canvas>
+                    </div>
+                    
+                    <!-- VU Meter -->
+                    <div class="vbr-waveform-section">
+                        <h3 class="vbr-section-title">音量表 (VU Meter)</h3>
+                        <canvas class="vbr-canvas" data-canvas="vu" width="800" height="50"></canvas>
+                    </div>
+                    
+                    <!-- 累積波形 -->
+                    <div class="vbr-waveform-section">
+                        <h3 class="vbr-section-title">累積波形（可拖曳平移、滾輪縮放、點擊定位）</h3>
+                        <canvas class="vbr-canvas" data-canvas="accumulated" width="800" height="200"></canvas>
+                        <div class="vbr-toolbar">
+                            <button class="vbr-toolbar-btn" data-action="zoom-in" disabled>
+                                <span>🔍+</span>
+                            </button>
+                            <button class="vbr-toolbar-btn" data-action="zoom-out" disabled>
+                                <span>🔍-</span>
+                            </button>
+                            <button class="vbr-toolbar-btn" data-action="zoom-reset" disabled>
+                                <span>🔄 重置視圖</span>
+                            </button>
+                            <button class="vbr-toolbar-btn" data-action="pan-left" disabled>
+                                <span>◀ 向左</span>
+                            </button>
+                            <button class="vbr-toolbar-btn" data-action="pan-right" disabled>
+                                <span>向右 ▶</span>
+                            </button>
+                            <label class="vbr-checkbox-label">
+                                <input type="checkbox" data-check="auto-scroll" checked>
+                                <span>自動捲動</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- 概覽波形 -->
+                    <div class="vbr-waveform-section">
+                        <h3 class="vbr-section-title">概覽波形（點擊或拖曳可快速導航）</h3>
+                        <canvas class="vbr-canvas" data-canvas="overview" width="800" height="80"></canvas>
+                    </div>
+                </div>
+                
+                <!-- 設定區 -->
+                <div class="vbr-settings">
+                    <!-- 裝置設定 -->
+                    <div class="vbr-settings-section">
+                        <h3 class="vbr-settings-title">裝置設定</h3>
+                        <div class="vbr-device-row">
+                            <label class="vbr-label">麥克風：</label>
+                            <div class="vbr-device-select-group">
+                                <select class="vbr-select" data-select="microphone" disabled>
+                                    <option>載入中...</option>
+                                </select>
+                                <button class="vbr-refresh-btn" data-action="refresh-mic" title="重新整理麥克風清單">🔄</button>
+                            </div>
+                            <small class="vbr-hint" data-hint="microphone">選擇要使用的麥克風裝置</small>
+                        </div>
+                        <div class="vbr-device-row">
+                            <label class="vbr-label">輸出裝置：</label>
+                            <div class="vbr-device-select-group">
+                                <select class="vbr-select" data-select="output" disabled>
+                                    <option value="default">系統預設輸出</option>
+                                </select>
+                                <button class="vbr-refresh-btn" data-action="refresh-output" title="重新整理輸出裝置清單">🔄</button>
+                            </div>
+                            <small class="vbr-hint" data-hint="output">部分瀏覽器需 HTTPS 才可切換輸出裝置</small>
+                        </div>
+                    </div>
+                    
+                    <!-- 進階選項 -->
+                    ${this.options.showAdvancedOptions ? `
+                    <div class="vbr-settings-section">
+                        <h3 class="vbr-settings-title">進階選項</h3>
+                        <div class="vbr-slider-row">
+                            <label class="vbr-label">麥克風增益：</label>
+                            <input type="range" class="vbr-slider" data-slider="gain" min="1" max="6" step="0.1" value="1.0">
+                            <span class="vbr-slider-value" data-value="gain">1.0x</span>
+                        </div>
+                        <div class="vbr-checkbox-row">
+                            <label class="vbr-checkbox-label">
+                                <input type="checkbox" data-check="agc">
+                                <span>自動增益控制 (AGC)</span>
+                            </label>
+                            <label class="vbr-checkbox-label">
+                                <input type="checkbox" data-check="echo-cancel">
+                                <span>回音消除</span>
+                            </label>
+                            <label class="vbr-checkbox-label">
+                                <input type="checkbox" data-check="noise-suppress">
+                                <span>背景降噪</span>
+                            </label>
+                        </div>
+                    </div>
+                    ` : ''}
+                    
+                    <!-- 錄音資訊 -->
+                    <div class="vbr-info-section" data-section="recording-info" style="display: none;">
+                        <h3 class="vbr-settings-title">錄音資訊</h3>
+                        <div class="vbr-info-grid">
+                            <div>時長：<span data-info="duration">00:00.000</span></div>
+                            <div>樣本數：<span data-info="samples">0</span></div>
+                            <div>採樣率：<span data-info="samplerate">48000</span> Hz</div>
+                            <div>檔案大小：<span data-info="filesize">0</span> KB</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 播放控制 -->
+                <div class="vbr-playback">
+                    <button class="vbr-btn vbr-btn-play" data-action="play" disabled>
+                        <span class="vbr-icon">▶</span>
+                        <span class="vbr-text">播放</span>
+                    </button>
+                    <button class="vbr-btn vbr-btn-pause" data-action="pause" disabled>
+                        <span class="vbr-icon">⏸</span>
+                        <span class="vbr-text">暫停</span>
+                    </button>
+                    <button class="vbr-btn vbr-btn-download" data-action="download" disabled>
+                        <span class="vbr-icon">💾</span>
+                        <span class="vbr-text">下載錄音</span>
+                    </button>
+                </div>
+                
+                <!-- 狀態日誌 -->
+                ${this.options.showStatusLog ? `
+                <div class="vbr-status-log" data-log="status">
+                    <div class="vbr-log-entry">
+                        <span class="vbr-log-time">[${this._getTimeString()}]</span>
+                        <span class="vbr-log-text">準備就緒</span>
+                    </div>
+                </div>
+                ` : ''}
+            </div>
+        `;
       }
 
       /**
-       * 緩存 DOM 元素引用
+       * 注入 CSS 樣式
+       * @private
        */
-      cacheElements() {
-        this.elements = {
-          // 按鈕
-          btnRecord: document.getElementById('vbr-btn-record'),
-          btnPlay: document.getElementById('vbr-btn-play'),
-          btnPause: document.getElementById('vbr-btn-pause'),
-          btnStop: document.getElementById('vbr-btn-stop'),
-          btnSave: document.getElementById('vbr-btn-save'),
-          btnClear: document.getElementById('vbr-btn-clear'),
-          btnLayoutToggle: document.getElementById('vbr-btn-layout-toggle'),
-          // 顯示元素
-          recordingDuration: document.getElementById('vbr-recording-duration'),
-          sampleCount: document.getElementById('vbr-sample-count'),
-          waveformWrapper: document.getElementById('vbr-waveform-wrapper'),
-          // Canvas 元素
-          liveCanvas: document.getElementById('vbr-live-waveform'),
-          vuMeterCanvas: document.getElementById('vbr-vu-meter'),
-          accumulatedCanvas: document.getElementById('vbr-accumulated-waveform'),
-          overviewCanvas: document.getElementById('vbr-overview-waveform')
+      _injectStyles() {
+        const styleId = 'voicebank-recorder-ui-styles';
+        if (document.getElementById(styleId)) return;
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = this._getStyles();
+        document.head.appendChild(style);
+      }
+
+      /**
+       * 獲取 CSS 樣式
+       * @private
+       * @returns {string}
+       */
+      _getStyles() {
+        const theme = this.options.theme;
+        return `
+            .voicebank-recorder-ui {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                max-width: 900px;
+                margin: 0 auto;
+            }
+            
+            /* 錄音控制按鈕 */
+            .vbr-controls {
+                display: flex;
+                gap: 15px;
+                justify-content: center;
+                margin-bottom: 30px;
+                padding: 20px;
+                background: #f9fafb;
+                border-radius: 10px;
+            }
+            
+            .vbr-btn {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 16px;
+                padding: 12px 30px;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                font-weight: 600;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            }
+            
+            .vbr-btn:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+            
+            .vbr-btn-record {
+                background: ${theme.errorColor};
+                color: white;
+            }
+            
+            .vbr-btn-record:hover:not(:disabled) {
+                background: #dc2626;
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+            }
+            
+            .vbr-btn-stop {
+                background: #9ca3af;
+                color: white;
+            }
+            
+            .vbr-btn-stop:hover:not(:disabled) {
+                background: #6b7280;
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(156, 163, 175, 0.3);
+            }
+            
+            .vbr-btn-play {
+                background: ${theme.primaryColor};
+                color: white;
+            }
+            
+            .vbr-btn-play:hover:not(:disabled) {
+                background: #5568d3;
+                transform: translateY(-2px);
+            }
+            
+            .vbr-btn-pause {
+                background: ${theme.warningColor};
+                color: white;
+            }
+            
+            .vbr-btn-pause:hover:not(:disabled) {
+                background: #d97706;
+                transform: translateY(-2px);
+            }
+            
+            .vbr-btn-download {
+                background: ${theme.primaryColor};
+                color: white;
+            }
+            
+            .vbr-btn-download:hover:not(:disabled) {
+                background: #5568d3;
+                transform: translateY(-2px);
+            }
+            
+            /* 波形區域 */
+            .vbr-waveforms {
+                margin-bottom: 30px;
+            }
+            
+            .vbr-waveform-section {
+                margin-bottom: 20px;
+            }
+            
+            .vbr-section-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: #555;
+                margin-bottom: 8px;
+            }
+            
+            .vbr-canvas {
+                display: block;
+                width: 100%;
+                border: 2px solid #e5e7eb;
+                border-radius: 8px;
+                background: #f9fafb;
+            }
+            
+            .vbr-toolbar {
+                display: flex;
+                gap: 10px;
+                margin-top: 10px;
+                flex-wrap: wrap;
+                align-items: center;
+            }
+            
+            .vbr-toolbar-btn {
+                padding: 8px 16px;
+                border: 1px solid #d0d0d0;
+                border-radius: 6px;
+                background: white;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 500;
+                color: #555;
+                transition: all 0.2s ease;
+            }
+            
+            .vbr-toolbar-btn:hover:not(:disabled) {
+                border-color: ${theme.primaryColor};
+                color: ${theme.primaryColor};
+                background: #f0f4ff;
+            }
+            
+            .vbr-toolbar-btn:disabled {
+                opacity: 0.4;
+                cursor: not-allowed;
+            }
+            
+            .vbr-checkbox-label {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                font-size: 13px;
+                color: #555;
+                cursor: pointer;
+            }
+            
+            /* 設定區域 */
+            .vbr-settings {
+                margin-bottom: 30px;
+            }
+            
+            .vbr-settings-section {
+                background: #f9fafb;
+                padding: 20px;
+                border-radius: 10px;
+                margin-bottom: 20px;
+            }
+            
+            .vbr-settings-title {
+                font-size: 16px;
+                font-weight: 600;
+                color: ${theme.primaryColor};
+                margin-bottom: 15px;
+            }
+            
+            .vbr-device-row {
+                margin-bottom: 15px;
+            }
+            
+            .vbr-label {
+                display: block;
+                font-size: 14px;
+                font-weight: 500;
+                color: #555;
+                margin-bottom: 5px;
+            }
+            
+            .vbr-device-select-group {
+                display: flex;
+                gap: 10px;
+            }
+            
+            .vbr-select {
+                flex: 1;
+                padding: 8px;
+                border: 1px solid #d0d0d0;
+                border-radius: 6px;
+                font-size: 14px;
+            }
+            
+            .vbr-refresh-btn {
+                padding: 8px 12px;
+                background: ${theme.primaryColor};
+                color: white;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 13px;
+            }
+            
+            .vbr-hint {
+                display: block;
+                color: #666;
+                font-size: 12px;
+                margin-top: 5px;
+            }
+            
+            .vbr-slider-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 15px;
+            }
+            
+            .vbr-slider {
+                flex: 1;
+            }
+            
+            .vbr-slider-value {
+                min-width: 50px;
+                font-weight: 600;
+            }
+            
+            .vbr-checkbox-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 15px;
+            }
+            
+            .vbr-info-section {
+                background: #f0f4ff;
+                padding: 20px;
+                border-radius: 10px;
+                border-left: 4px solid ${theme.primaryColor};
+            }
+            
+            .vbr-info-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 10px;
+                font-size: 14px;
+            }
+            
+            .vbr-info-grid span {
+                font-weight: 600;
+                color: ${theme.primaryColor};
+            }
+            
+            /* 播放控制 */
+            .vbr-playback {
+                display: flex;
+                gap: 15px;
+                justify-content: center;
+                margin-bottom: 30px;
+            }
+            
+            /* 狀態日誌 */
+            .vbr-status-log {
+                background: #1f2937;
+                color: ${theme.successColor};
+                padding: 20px;
+                border-radius: 10px;
+                font-family: 'Courier New', monospace;
+                font-size: 13px;
+                line-height: 1.8;
+                max-height: 200px;
+                overflow-y: auto;
+            }
+            
+            .vbr-log-entry {
+                margin-bottom: 5px;
+            }
+            
+            .vbr-log-time {
+                color: #6b7280;
+                margin-right: 10px;
+            }
+            
+            .vbr-log-error {
+                color: ${theme.errorColor};
+            }
+            
+            .vbr-log-warning {
+                color: ${theme.warningColor};
+            }
+            
+            .vbr-log-success {
+                color: ${theme.successColor};
+            }
+        `;
+      }
+
+      /**
+       * 快取 DOM 元素引用
+       * @private
+       */
+      _cacheElements() {
+        const root = this.container.querySelector('.voicebank-recorder-ui');
+
+        // 按鈕
+        this.elements.recordBtn = root.querySelector('[data-action="record"]');
+        this.elements.stopBtn = root.querySelector('[data-action="stop"]');
+        this.elements.playBtn = root.querySelector('[data-action="play"]');
+        this.elements.pauseBtn = root.querySelector('[data-action="pause"]');
+        this.elements.downloadBtn = root.querySelector('[data-action="download"]');
+
+        // 波形工具列按鈕
+        this.elements.zoomInBtn = root.querySelector('[data-action="zoom-in"]');
+        this.elements.zoomOutBtn = root.querySelector('[data-action="zoom-out"]');
+        this.elements.zoomResetBtn = root.querySelector('[data-action="zoom-reset"]');
+        this.elements.panLeftBtn = root.querySelector('[data-action="pan-left"]');
+        this.elements.panRightBtn = root.querySelector('[data-action="pan-right"]');
+        this.elements.autoScrollCheck = root.querySelector('[data-check="auto-scroll"]');
+
+        // Canvas
+        this.elements.liveCanvas = root.querySelector('[data-canvas="live"]');
+        this.elements.vuCanvas = root.querySelector('[data-canvas="vu"]');
+        this.elements.accumulatedCanvas = root.querySelector('[data-canvas="accumulated"]');
+        this.elements.overviewCanvas = root.querySelector('[data-canvas="overview"]');
+
+        // 裝置選擇
+        this.elements.micSelect = root.querySelector('[data-select="microphone"]');
+        this.elements.outputSelect = root.querySelector('[data-select="output"]');
+        this.elements.refreshMicBtn = root.querySelector('[data-action="refresh-mic"]');
+        this.elements.refreshOutputBtn = root.querySelector('[data-action="refresh-output"]');
+
+        // 進階選項
+        if (this.options.showAdvancedOptions) {
+          this.elements.gainSlider = root.querySelector('[data-slider="gain"]');
+          this.elements.gainValue = root.querySelector('[data-value="gain"]');
+          this.elements.agcCheck = root.querySelector('[data-check="agc"]');
+          this.elements.echoCancelCheck = root.querySelector('[data-check="echo-cancel"]');
+          this.elements.noiseSuppressCheck = root.querySelector('[data-check="noise-suppress"]');
+        }
+
+        // 錄音資訊
+        this.elements.recordingInfo = root.querySelector('[data-section="recording-info"]');
+        this.elements.durationInfo = root.querySelector('[data-info="duration"]');
+        this.elements.samplesInfo = root.querySelector('[data-info="samples"]');
+        this.elements.samplerateInfo = root.querySelector('[data-info="samplerate"]');
+        this.elements.filesizeInfo = root.querySelector('[data-info="filesize"]');
+
+        // 狀態日誌
+        if (this.options.showStatusLog) {
+          this.elements.statusLog = root.querySelector('[data-log="status"]');
+        }
+      }
+
+      /**
+       * 初始化音訊引擎
+       * @private
+       */
+      async _initializeAudioEngine() {
+        const audioConfig = {
+          sampleRate: 48000,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          autoManageDevices: true,
+          ...this.options.audioConfig
         };
+        this.audioEngine = new AudioEngine(audioConfig);
+        await this.audioEngine.initialize();
+        this.deviceManager = this.audioEngine.deviceManager;
+        this._log('音訊引擎初始化完成', 'info');
       }
 
       /**
-       * 綁定事件處理器
+       * 初始化波形渲染器
+       * @private
        */
-      bindEvents() {
-        // 錄音按鈕
-        if (this.elements.btnRecord) {
-          this.elements.btnRecord.addEventListener('click', () => {
-            this.handleRecordToggle();
-          });
-        }
-
-        // 播放控制按鈕
-        if (this.elements.btnPlay) {
-          this.elements.btnPlay.addEventListener('click', () => {
-            this.handlePlay();
-          });
-        }
-        if (this.elements.btnPause) {
-          this.elements.btnPause.addEventListener('click', () => {
-            this.handlePause();
-          });
-        }
-        if (this.elements.btnStop) {
-          this.elements.btnStop.addEventListener('click', () => {
-            this.handleStop();
-          });
-        }
-
-        // 工具按鈕
-        if (this.elements.btnSave) {
-          this.elements.btnSave.addEventListener('click', () => {
-            this.handleSave();
-          });
-        }
-        if (this.elements.btnClear) {
-          this.elements.btnClear.addEventListener('click', () => {
-            this.handleClear();
-          });
-        }
-        if (this.elements.btnLayoutToggle) {
-          this.elements.btnLayoutToggle.addEventListener('click', () => {
-            this.handleLayoutToggle();
-          });
-        }
-
-        // 視窗大小變更
-        window.addEventListener('resize', () => {
-          this.handleResize();
-        });
+      async _initializeWaveformRenderer() {
+        const waveformConfig = {
+          liveCanvas: this.elements.liveCanvas,
+          vuMeterCanvas: this.elements.vuCanvas,
+          accumulatedCanvas: this.elements.accumulatedCanvas,
+          overviewCanvas: this.elements.overviewCanvas,
+          audioEngine: this.audioEngine,
+          useWorker: false,
+          showClipMarks: true,
+          ...this.options.waveformConfig
+        };
+        this.waveformRenderer = new WaveformRenderer(waveformConfig);
+        await this.waveformRenderer.initialize();
+        this._log('波形渲染器初始化完成', 'info');
       }
 
       /**
-       * 初始化子控制器（可選）
+       * 綁定所有事件
+       * @private
        */
-      initializeSubControllers() {
-        // 這裡可以初始化其他 UI 子控制器
-        // 例如：this.controlPanel = new ControlPanel(this);
-        // 目前先保持簡單
+      _bindEvents() {
+        // 錄音控制
+        this.elements.recordBtn.addEventListener('click', () => this._handleRecord());
+        this.elements.stopBtn.addEventListener('click', () => this._handleStop());
+
+        // 播放控制
+        this.elements.playBtn.addEventListener('click', () => this._handlePlay());
+        this.elements.pauseBtn.addEventListener('click', () => this._handlePause());
+        this.elements.downloadBtn.addEventListener('click', () => this._handleDownload());
+
+        // 波形工具列
+        this.elements.zoomInBtn.addEventListener('click', () => this._handleZoomIn());
+        this.elements.zoomOutBtn.addEventListener('click', () => this._handleZoomOut());
+        this.elements.zoomResetBtn.addEventListener('click', () => this._handleZoomReset());
+        this.elements.panLeftBtn.addEventListener('click', () => this._handlePanLeft());
+        this.elements.panRightBtn.addEventListener('click', () => this._handlePanRight());
+        this.elements.autoScrollCheck.addEventListener('change', e => this._handleAutoScrollChange(e));
+
+        // 裝置選擇
+        this.elements.micSelect.addEventListener('change', e => this._handleMicChange(e));
+        this.elements.outputSelect.addEventListener('change', e => this._handleOutputChange(e));
+        this.elements.refreshMicBtn.addEventListener('click', () => this._refreshMicrophones());
+        this.elements.refreshOutputBtn.addEventListener('click', () => this._refreshOutputDevices());
+
+        // 進階選項
+        if (this.options.showAdvancedOptions) {
+          this.elements.gainSlider.addEventListener('input', e => this._handleGainChange(e));
+          this.elements.agcCheck.addEventListener('change', e => this._handleAGCChange(e));
+          this.elements.echoCancelCheck.addEventListener('change', e => this._handleEchoCancelChange(e));
+          this.elements.noiseSuppressCheck.addEventListener('change', e => this._handleNoiseSuppressChange(e));
+        }
       }
 
       /**
-       * 應用初始設定
+       * 初始化裝置列表
+       * @private
        */
-      applyInitialSettings() {
-        // 應用佈局
-        this.applyLayout(this.options.layout);
-
-        // 應用主題
-        this.applyTheme(this.options.theme);
-
-        // 初始化按鈕狀態
-        this.updateButtonStates();
-      }
-
-      /**
-       * 連接核心模組事件
-       */
-      connectCoreModules() {
-        if (!this.audioEngine || !this.waveformRenderer) {
-          console.warn('Core modules not provided, UI will have limited functionality');
+      async _initializeDevices() {
+        if (!this.deviceManager) {
+          this._log('❌ DeviceManager 尚未初始化', 'error');
           return;
         }
-
-        // AudioEngine 事件
-        this.audioEngine.on('recording-start', () => {
-          this.onRecordingStart();
-        });
-        this.audioEngine.on('recording-stop', data => {
-          this.onRecordingStop(data);
-        });
-        this.audioEngine.on('data-available', data => {
-          this.onDataAvailable(data);
-        });
-        this.audioEngine.on('error', error => {
-          this.onAudioError(error);
-        });
-      }
-
-      // ==================== 事件處理器 ====================
-
-      /**
-       * 處理錄音按鈕切換
-       */
-      async handleRecordToggle() {
-        try {
-          if (this.state.isRecording) {
-            // 停止錄音
-            await this.audioEngine.stopRecording();
-          } else {
-            // 開始錄音
-            await this.audioEngine.startRecording();
-          }
-        } catch (error) {
-          this.callbacks.onError(error);
-          this.showError('錄音操作失敗：' + error.message);
-        }
+        await this._refreshMicrophones();
+        await this._refreshOutputDevices();
       }
 
       /**
-       * 處理播放
+       * 重新整理麥克風列表
+       * @private
        */
-      async handlePlay() {
-        try {
-          // TODO: 實現播放邏輯
-          console.log('Play recording');
-          this.callbacks.onPlayStart();
-        } catch (error) {
-          this.callbacks.onError(error);
-        }
-      }
-
-      /**
-       * 處理暫停
-       */
-      async handlePause() {
-        try {
-          // TODO: 實現暫停邏輯
-          console.log('Pause playback');
-        } catch (error) {
-          this.callbacks.onError(error);
-        }
-      }
-
-      /**
-       * 處理停止
-       */
-      async handleStop() {
-        try {
-          // TODO: 實現停止邏輯
-          console.log('Stop playback');
-          this.callbacks.onPlayStop();
-        } catch (error) {
-          this.callbacks.onError(error);
-        }
-      }
-
-      /**
-       * 處理儲存
-       */
-      async handleSave() {
-        try {
-          // TODO: 實現儲存邏輯
-          console.log('Save recording');
-        } catch (error) {
-          this.callbacks.onError(error);
-        }
-      }
-
-      /**
-       * 處理清除
-       */
-      async handleClear() {
-        if (!confirm('確定要清除當前錄音嗎？')) {
+      async _refreshMicrophones() {
+        if (!this.deviceManager) {
+          this._log('❌ DeviceManager 尚未初始化', 'error');
+          this.elements.micSelect.innerHTML = '<option>初始化失敗</option>';
+          this.elements.micSelect.disabled = true;
           return;
         }
         try {
-          // 清除波形
-          if (this.waveformRenderer) {
-            this.waveformRenderer.reset();
+          this._log('🔍 正在列舉麥克風裝置...', 'info');
+          const microphones = await this.deviceManager.enumerateMicrophones();
+          this.elements.micSelect.innerHTML = '';
+          if (microphones.length === 0) {
+            this.elements.micSelect.innerHTML = '<option>未偵測到麥克風</option>';
+            this.elements.micSelect.disabled = true;
+            this._log('⚠️ 未偵測到麥克風裝置', 'warning');
+            return;
+          }
+          microphones.forEach((device, index) => {
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+            option.textContent = device.label || `麥克風 ${index + 1}`;
+            this.elements.micSelect.appendChild(option);
+          });
+
+          // 恢復上次選擇
+          const savedId = this.deviceManager.getSelectedMicrophoneId();
+          if (savedId && this.deviceManager.isDeviceAvailable(savedId, 'microphone')) {
+            this.elements.micSelect.value = savedId;
+          } else if (microphones.length > 0) {
+            this.deviceManager.selectMicrophone(microphones[0].deviceId, true);
+            this.elements.micSelect.value = microphones[0].deviceId;
+          }
+          this.elements.micSelect.disabled = false;
+          this._log(`✅ 找到 ${microphones.length} 個麥克風裝置`, 'success');
+        } catch (error) {
+          this._log(`❌ 列舉麥克風失敗: ${error.message}`, 'error');
+          console.error('列舉麥克風詳細錯誤:', error);
+          this.elements.micSelect.innerHTML = '<option>需要麥克風權限</option>';
+          this.elements.micSelect.disabled = true;
+        }
+      }
+
+      /**
+       * 重新整理輸出裝置列表
+       * @private
+       */
+      async _refreshOutputDevices() {
+        if (!this.deviceManager) {
+          this._log('❌ DeviceManager 尚未初始化', 'error');
+          this.elements.outputSelect.innerHTML = '<option value="default">系統預設輸出</option>';
+          this.elements.outputSelect.disabled = true;
+          return;
+        }
+        if (!this.deviceManager.isSupported()) {
+          this.elements.outputSelect.innerHTML = '<option value="default">系統預設輸出</option>';
+          this.elements.outputSelect.disabled = true;
+          this._log('ℹ️ 此瀏覽器不支援輸出裝置切換', 'info');
+          return;
+        }
+        try {
+          this._log('🔍 正在列舉輸出裝置...', 'info');
+          const outputs = await this.deviceManager.enumerateOutputDevices();
+          this.elements.outputSelect.innerHTML = '<option value="default">系統預設輸出</option>';
+          if (outputs.length === 0) {
+            this.elements.outputSelect.disabled = true;
+            this._log('ℹ️ 未偵測到輸出裝置', 'info');
+            return;
+          }
+          this.elements.outputSelect.disabled = false;
+          outputs.forEach((device, index) => {
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+            option.textContent = device.label || `揚聲器 ${index + 1}`;
+            this.elements.outputSelect.appendChild(option);
+          });
+
+          // 恢復上次選擇
+          const savedId = this.deviceManager.getSelectedOutputDeviceId();
+          if (savedId && savedId !== 'default') {
+            this.elements.outputSelect.value = savedId;
+          }
+          this._log(`✅ 找到 ${outputs.length} 個輸出裝置`, 'success');
+        } catch (error) {
+          this._log(`❌ 列舉輸出裝置失敗: ${error.message}`, 'error');
+          console.error('列舉輸出裝置詳細錯誤:', error);
+        }
+      }
+
+      /**
+       * 處理錄音按鈕點擊
+       * @private
+       */
+      async _handleRecord() {
+        try {
+          this._log('開始錄音...', 'info');
+          await this.audioEngine.startRecording();
+          this.elements.recordBtn.disabled = true;
+          this.elements.stopBtn.disabled = false;
+
+          // 停用波形工具列
+          this.elements.zoomInBtn.disabled = true;
+          this.elements.zoomOutBtn.disabled = true;
+          this.elements.zoomResetBtn.disabled = true;
+          this.elements.panLeftBtn.disabled = true;
+          this.elements.panRightBtn.disabled = true;
+          this._log('✓ 錄音已開始', 'success');
+        } catch (error) {
+          this._log(`❌ 錄音失敗: ${error.message}`, 'error');
+          console.error('Recording Error:', error);
+        }
+      }
+
+      /**
+       * 處理停止按鈕點擊
+       * @private
+       */
+      async _handleStop() {
+        try {
+          this._log('停止錄音...', 'info');
+          const blob = await this.audioEngine.stopRecording();
+          this.elements.recordBtn.disabled = false;
+          this.elements.stopBtn.disabled = true;
+          this.elements.playBtn.disabled = false;
+          this.elements.downloadBtn.disabled = false;
+
+          // 啟用波形工具列
+          this.elements.zoomInBtn.disabled = false;
+          this.elements.zoomOutBtn.disabled = false;
+          this.elements.zoomResetBtn.disabled = false;
+          this.elements.panLeftBtn.disabled = false;
+          this.elements.panRightBtn.disabled = false;
+          this._log(`✓ 錄音已停止 - ${(blob.size / 1024).toFixed(2)} KB`, 'success');
+
+          // 更新錄音資訊
+          this._updateRecordingInfo(blob);
+
+          // 清理舊的音訊資源
+          if (this.audioPlayer) {
+            this.audioPlayer.pause();
+            this.audioPlayer.src = '';
+            this.audioPlayer = null;
+          }
+          if (this.recordedUrl) {
+            URL.revokeObjectURL(this.recordedUrl);
           }
 
-          // 重置狀態
-          this.state.hasRecording = false;
-          this.state.duration = 0;
-          this.state.sampleCount = 0;
-
-          // 更新顯示
-          this.updateDurationDisplay();
-          this.updateButtonStates();
-          console.log('Recording cleared');
+          // 保存新的 blob
+          this.recordedBlob = blob;
+          this.recordedUrl = URL.createObjectURL(blob);
         } catch (error) {
-          this.callbacks.onError(error);
+          this._log(`❌ 停止失敗: ${error.message}`, 'error');
+          console.error('Stop Error:', error);
         }
       }
 
       /**
-       * 處理佈局切換
+       * 處理播放按鈕點擊
+       * @private
        */
-      handleLayoutToggle() {
-        const currentLayout = this.container.dataset.layout;
-        const newLayout = currentLayout === 'horizontal' ? 'vertical' : 'horizontal';
-        this.applyLayout(newLayout);
-      }
+      async _handlePlay() {
+        try {
+          if (!this.recordedUrl) {
+            this._log('❌ 沒有可播放的錄音', 'error');
+            return;
+          }
+          this._log('播放錄音...', 'info');
 
-      /**
-       * 處理視窗大小變更
-       */
-      handleResize() {
-        // 調整 Canvas 尺寸
-        if (this.waveformRenderer) {
-          this.waveformRenderer.resize();
-        }
-      }
+          // 每次播放都重新創建音訊播放器
+          if (this.audioPlayer) {
+            this.audioPlayer.pause();
+            this.audioPlayer.src = '';
+            this.audioPlayer = null;
+          }
+          this.audioPlayer = new Audio(this.recordedUrl);
+          this.audioPlayer.addEventListener('ended', () => {
+            this.elements.playBtn.disabled = false;
+            this.elements.pauseBtn.disabled = true;
+            this._log('✓ 播放完成', 'info');
+          });
 
-      // ==================== 核心模組事件回調 ====================
-
-      /**
-       * 錄音開始回調
-       */
-      onRecordingStart() {
-        this.state.isRecording = true;
-        this.state.hasRecording = true;
-
-        // 更新 UI
-        this.setRecordingState(true);
-        this.updateButtonStates();
-
-        // 啟動波形顯示
-        if (this.waveformRenderer) ;
-
-        // 回調
-        this.callbacks.onRecordStart();
-        console.log('🎙️ Recording started');
-      }
-
-      /**
-       * 錄音停止回調
-       */
-      onRecordingStop(data) {
-        this.state.isRecording = false;
-
-        // 更新 UI
-        this.setRecordingState(false);
-        this.updateButtonStates();
-
-        // 回調
-        this.callbacks.onRecordStop(data);
-        console.log('⏹️ Recording stopped', data);
-      }
-
-      /**
-       * 數據可用回調
-       */
-      onDataAvailable(data) {
-        // 更新時長和樣本數
-        if (data.duration !== undefined) {
-          this.state.duration = data.duration;
-        }
-        if (data.sampleCount !== undefined) {
-          this.state.sampleCount = data.sampleCount;
-        }
-
-        // 更新顯示
-        this.updateDurationDisplay();
-      }
-
-      /**
-       * 音訊錯誤回調
-       */
-      onAudioError(error) {
-        this.showError('音訊錯誤：' + error.message);
-        this.callbacks.onError(error);
-      }
-
-      // ==================== UI 更新方法 ====================
-
-      /**
-       * 設定錄音狀態
-       * @param {boolean} isRecording - 是否正在錄音
-       */
-      setRecordingState(isRecording) {
-        const btn = this.elements.btnRecord;
-        if (!btn) return;
-        if (isRecording) {
-          btn.classList.add('recording');
-          btn.querySelector('.icon').textContent = '⏹';
-          btn.querySelector('.label').textContent = '停止錄音';
-        } else {
-          btn.classList.remove('recording');
-          btn.querySelector('.icon').textContent = '●';
-          btn.querySelector('.label').textContent = '開始錄音';
+          // 設置輸出裝置
+          if (this.deviceManager) {
+            try {
+              await this.deviceManager.setAudioOutputDevice(this.audioPlayer);
+            } catch (err) {
+              console.warn('設置輸出裝置失敗:', err);
+            }
+          }
+          await this.audioPlayer.play();
+          this.elements.playBtn.disabled = true;
+          this.elements.pauseBtn.disabled = false;
+          this._log('✓ 播放中', 'info');
+        } catch (error) {
+          this._log(`❌ 播放失敗: ${error.message}`, 'error');
+          console.error('Play Error:', error);
         }
       }
 
       /**
-       * 更新按鈕狀態
+       * 處理暫停按鈕點擊
+       * @private
        */
-      updateButtonStates() {
-        const {
-          isRecording,
-          isPlaying,
-          isPaused,
-          hasRecording
-        } = this.state;
-
-        // 錄音按鈕：播放時禁用
-        if (this.elements.btnRecord) {
-          this.elements.btnRecord.disabled = isPlaying;
-        }
-
-        // 播放控制按鈕：沒有錄音時禁用
-        if (this.elements.btnPlay) {
-          this.elements.btnPlay.disabled = !hasRecording || isRecording || isPlaying;
-        }
-        if (this.elements.btnPause) {
-          this.elements.btnPause.disabled = !isPlaying || isPaused;
-        }
-        if (this.elements.btnStop) {
-          this.elements.btnStop.disabled = !isPlaying && !isPaused;
-        }
-
-        // 工具按鈕
-        if (this.elements.btnSave) {
-          this.elements.btnSave.disabled = !hasRecording || isRecording;
-        }
-        if (this.elements.btnClear) {
-          this.elements.btnClear.disabled = !hasRecording || isRecording;
+      _handlePause() {
+        try {
+          if (!this.audioPlayer) {
+            this._log('❌ 沒有正在播放的音訊', 'error');
+            return;
+          }
+          this._log('暫停播放...', 'info');
+          this.audioPlayer.pause();
+          this.elements.playBtn.disabled = false;
+          this.elements.pauseBtn.disabled = true;
+          this._log('✓ 已暫停', 'info');
+        } catch (error) {
+          this._log(`❌ 暫停失敗: ${error.message}`, 'error');
+          console.error('Pause Error:', error);
         }
       }
 
       /**
-       * 更新時長顯示
+       * 處理下載按鈕點擊
+       * @private
        */
-      updateDurationDisplay() {
-        if (this.elements.recordingDuration) {
-          this.elements.recordingDuration.textContent = this.formatDuration(this.state.duration);
+      _handleDownload() {
+        try {
+          if (!this.recordedBlob) {
+            this._log('❌ 沒有可下載的錄音', 'error');
+            return;
+          }
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          const filename = `voicebank-recording-${timestamp}.wav`;
+          const a = document.createElement('a');
+          a.href = this.recordedUrl;
+          a.download = filename;
+          a.click();
+          this._log(`💾 已下載: ${filename}`, 'success');
+        } catch (error) {
+          this._log(`❌ 下載失敗: ${error.message}`, 'error');
+          console.error('Download Error:', error);
         }
-        if (this.elements.sampleCount) {
-          this.elements.sampleCount.textContent = `${this.state.sampleCount.toLocaleString()} samples`;
+      }
+
+      /**
+       * 處理放大按鈕點擊
+       * @private
+       */
+      _handleZoomIn() {
+        if (this.waveformRenderer && this.waveformRenderer.accumulatedWaveform) {
+          this.waveformRenderer.accumulatedWaveform.zoomBySteps(1, 0.5);
+          this._log('🔍 放大波形', 'info');
         }
+      }
+
+      /**
+       * 處理縮小按鈕點擊
+       * @private
+       */
+      _handleZoomOut() {
+        if (this.waveformRenderer && this.waveformRenderer.accumulatedWaveform) {
+          this.waveformRenderer.accumulatedWaveform.zoomBySteps(-1, 0.5);
+          this._log('🔍 縮小波形', 'info');
+        }
+      }
+
+      /**
+       * 處理重置視圖按鈕點擊
+       * @private
+       */
+      _handleZoomReset() {
+        if (this.waveformRenderer && this.waveformRenderer.accumulatedWaveform) {
+          this.waveformRenderer.accumulatedWaveform.setZoom(1);
+          this.waveformRenderer.accumulatedWaveform.isAutoScroll = true;
+          this.elements.autoScrollCheck.checked = true;
+          this._log('🔄 重置視圖', 'info');
+        }
+      }
+
+      /**
+       * 處理向左平移按鈕點擊
+       * @private
+       */
+      _handlePanLeft() {
+        if (this.waveformRenderer && this.waveformRenderer.accumulatedWaveform) {
+          const info = this.waveformRenderer.accumulatedWaveform.getVisibleSamples();
+          this.waveformRenderer.accumulatedWaveform.panBySamples(-Math.floor(info.visible * 0.2));
+          this._log('◀ 向左移動', 'info');
+        }
+      }
+
+      /**
+       * 處理向右平移按鈕點擊
+       * @private
+       */
+      _handlePanRight() {
+        if (this.waveformRenderer && this.waveformRenderer.accumulatedWaveform) {
+          const info = this.waveformRenderer.accumulatedWaveform.getVisibleSamples();
+          this.waveformRenderer.accumulatedWaveform.panBySamples(Math.floor(info.visible * 0.2));
+          this._log('▶ 向右移動', 'info');
+        }
+      }
+
+      /**
+       * 處理自動捲動開關改變
+       * @private
+       */
+      _handleAutoScrollChange(e) {
+        if (this.waveformRenderer && this.waveformRenderer.accumulatedWaveform) {
+          this.waveformRenderer.accumulatedWaveform.isAutoScroll = e.target.checked;
+          this._log(e.target.checked ? '✓ 啟用自動捲動' : '✗ 停用自動捲動', 'info');
+        }
+      }
+
+      /**
+       * 處理麥克風選擇改變
+       * @private
+       */
+      _handleMicChange(e) {
+        const deviceId = e.target.value;
+        const deviceLabel = e.target.options[e.target.selectedIndex].text;
+        this.deviceManager.selectMicrophone(deviceId, true);
+        this._log(`🎤 已選擇麥克風: ${deviceLabel}`, 'info');
+      }
+
+      /**
+       * 處理輸出裝置選擇改變
+       * @private
+       */
+      _handleOutputChange(e) {
+        const deviceId = e.target.value;
+        const deviceLabel = e.target.options[e.target.selectedIndex].text;
+        this.deviceManager.selectOutputDevice(deviceId, true);
+        this._log(`🔊 已選擇輸出裝置: ${deviceLabel}`, 'info');
+      }
+
+      /**
+       * 處理麥克風增益改變
+       * @private
+       */
+      _handleGainChange(e) {
+        const gain = parseFloat(e.target.value);
+        this.elements.gainValue.textContent = gain.toFixed(1) + 'x';
+        if (this.audioEngine && this.audioEngine.setMicGain) {
+          this.audioEngine.setMicGain(gain);
+          this._log(`🎚️ 增益調整為 ${gain.toFixed(1)}x`, 'info');
+        }
+      }
+
+      /**
+       * 處理 AGC 開關改變
+       * @private
+       */
+      _handleAGCChange(e) {
+        this._log(`AGC ${e.target.checked ? '已啟用' : '已停用'}（將在下次錄音時生效）`, 'info');
+        // Note: 需要重新開始錄音才會生效
+      }
+
+      /**
+       * 處理回音消除開關改變
+       * @private
+       */
+      _handleEchoCancelChange(e) {
+        this._log(`回音消除 ${e.target.checked ? '已啟用' : '已停用'}（將在下次錄音時生效）`, 'info');
+        // Note: 需要重新開始錄音才會生效
+      }
+
+      /**
+       * 處理背景降噪開關改變
+       * @private
+       */
+      _handleNoiseSuppressChange(e) {
+        this._log(`背景降噪 ${e.target.checked ? '已啟用' : '已停用'}（將在下次錄音時生效）`, 'info');
+        // Note: 需要重新開始錄音才會生效
+      }
+
+      /**
+       * 更新錄音資訊
+       * @private
+       */
+      _updateRecordingInfo(blob) {
+        const duration = (this.audioEngine.recordStopTime - this.audioEngine.recordStartTime) / 1000;
+        const samples = this.audioEngine.pcmTotalSamples || 0;
+        const sampleRate = this.audioEngine.audioContext.sampleRate;
+        this.elements.durationInfo.textContent = this._formatDuration(duration);
+        this.elements.samplesInfo.textContent = samples.toLocaleString();
+        this.elements.samplerateInfo.textContent = sampleRate.toLocaleString();
+        this.elements.filesizeInfo.textContent = (blob.size / 1024).toFixed(2);
+        this.elements.recordingInfo.style.display = 'block';
       }
 
       /**
        * 格式化時長
-       * @param {number} seconds - 秒數
-       * @returns {string} 格式化後的時長 (MM:SS.S)
+       * @private
        */
-      formatDuration(seconds) {
-        const minutes = Math.floor(seconds / 60);
+      _formatDuration(seconds) {
+        const mins = Math.floor(seconds / 60);
         const secs = Math.floor(seconds % 60);
-        const decimal = Math.floor(seconds % 1 * 10);
-        return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${decimal}`;
+        const ms = Math.floor(seconds % 1 * 1000);
+        return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
       }
 
       /**
-       * 應用佈局
-       * @param {string} layout - 'horizontal', 'vertical', 'auto'
+       * 獲取當前時間字串
+       * @private
        */
-      applyLayout(layout) {
-        if (layout === 'auto') {
-          // 自動偵測
-          layout = window.innerWidth > window.innerHeight ? 'horizontal' : 'vertical';
-        }
-        this.container.dataset.layout = layout;
-        this.options.layout = layout;
-
-        // 通知 WaveformRenderer
-        if (this.waveformRenderer) {
-          this.waveformRenderer.setVerticalMode(layout === 'vertical');
-        }
-        console.log(`📐 Layout changed to: ${layout}`);
+      _getTimeString() {
+        const now = new Date();
+        return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
       }
 
       /**
-       * 應用主題
-       * @param {string} theme - 'light', 'dark'
+       * 記錄日誌
+       * @private
        */
-      applyTheme(theme) {
-        this.container.dataset.theme = theme;
-        this.options.theme = theme;
-        console.log(`🎨 Theme changed to: ${theme}`);
+      _log(message, type = 'info') {
+        if (!this.options.showStatusLog || !this.elements.statusLog) return;
+        const entry = document.createElement('div');
+        entry.className = 'vbr-log-entry';
+        const time = document.createElement('span');
+        time.className = 'vbr-log-time';
+        time.textContent = `[${this._getTimeString()}]`;
+        const text = document.createElement('span');
+        text.className = `vbr-log-text vbr-log-${type}`;
+        text.textContent = message;
+        entry.appendChild(time);
+        entry.appendChild(text);
+        this.elements.statusLog.appendChild(entry);
+        this.elements.statusLog.scrollTop = this.elements.statusLog.scrollHeight;
       }
 
       /**
-       * 顯示錯誤訊息
-       * @param {string} message - 錯誤訊息
-       */
-      showError(message) {
-        // 簡單的錯誤顯示（可以擴展為更好的 UI）
-        alert('錯誤：' + message);
-      }
-
-      /**
-       * 顯示通知
-       * @param {string} message - 通知訊息
-       * @param {number} duration - 持續時間（毫秒）
-       */
-      showNotice(message, duration = 3000) {
-        // 簡單的通知顯示（可以擴展為更好的 UI）
-        console.log('📢 Notice:', message);
-      }
-
-      // ==================== 公開 API ====================
-
-      /**
-       * 取得當前狀態
-       * @returns {Object} 狀態物件
-       */
-      getState() {
-        return {
-          ...this.state
-        };
-      }
-
-      /**
-       * 設定選項
-       * @param {Object} options - 選項物件
-       */
-      setOptions(options) {
-        this.options = {
-          ...this.options,
-          ...options
-        };
-
-        // 應用變更
-        if (options.layout) {
-          this.applyLayout(options.layout);
-        }
-        if (options.theme) {
-          this.applyTheme(options.theme);
-        }
-      }
-
-      /**
-       * 銷毀 UI
+       * 銷毀 UI 和所有資源
        */
       destroy() {
-        // 移除事件監聽器
-        // （簡化版，實際應該記錄所有監聽器並逐一移除）
-
-        // 清空容器
-        if (this.container) {
-          this.container.innerHTML = '';
+        // 停止錄音
+        if (this.audioEngine && this.audioEngine.isRecording) {
+          this.audioEngine.stopRecording();
         }
 
-        // 清空引用
-        this.elements = {};
-        this.audioEngine = null;
-        this.waveformRenderer = null;
-        console.log('🗑️ RecorderUI destroyed');
+        // 停止播放
+        if (this.audioPlayer) {
+          this.audioPlayer.pause();
+          this.audioPlayer.src = '';
+          this.audioPlayer = null;
+        }
+
+        // 釋放 blob URL
+        if (this.recordedUrl) {
+          URL.revokeObjectURL(this.recordedUrl);
+          this.recordedUrl = null;
+        }
+
+        // 銷毀波形渲染器
+        if (this.waveformRenderer) {
+          this.waveformRenderer.destroy();
+          this.waveformRenderer = null;
+        }
+
+        // 銷毀音訊引擎
+        if (this.audioEngine) {
+          this.audioEngine.destroy();
+          this.audioEngine = null;
+        }
+
+        // 清空 UI
+        this.container.innerHTML = '';
+        this.isInitialized = false;
+        this._log('VoiceBank Recorder UI 已銷毀', 'info');
       }
     }
 
@@ -4916,12 +5516,12 @@
     exports.ElectronAdapter = ElectronAdapter;
     exports.IndexedDBAdapter = IndexedDBAdapter;
     exports.PlatformDetector = PlatformDetector;
-    exports.RecorderUI = RecorderUI;
     exports.ServerAdapter = ServerAdapter;
     exports.StorageAdapter = StorageAdapter;
     exports.StorageFactory = StorageFactory;
     exports.VERSION = VERSION;
     exports.VoiceBankRecorder = VoiceBankRecorder;
+    exports.VoiceBankRecorderUI = VoiceBankRecorderUI;
     exports.WaveformRenderer = WaveformRenderer;
     exports.default = VoiceBankRecorder;
 
