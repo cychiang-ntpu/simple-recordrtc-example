@@ -14,18 +14,20 @@ Thumbs.db
 *.swo
 *~
 
-# Node.js dependencies (if any)
+# Node.js dependencies
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-package-lock.json
-yarn.lock
+.pnpm-debug.log*
 
-# PHP
-composer.phar
-vendor/
-.env
+# Lock files (keep package-lock.json for reproducible builds)
+# package-lock.json  # 註解掉，應該要保留
+yarn.lock
+pnpm-lock.yaml
+
+# Build output
+dist/
 
 # Uploaded files - keep uploads directory but ignore contents
 public/uploads/*
@@ -61,3 +63,12 @@ cache/
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Testing
+coverage/
+*.test.js.snap
+.nyc_output/
+
+# PHP (backend only)
+composer.phar
+backend/vendor/
