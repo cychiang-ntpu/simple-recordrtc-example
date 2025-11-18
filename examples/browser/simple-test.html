@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoiceBank Recorder - 簡易測試</title>
+    <link rel="stylesheet" href="../../public/assets/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎙️ VoiceBank Recorder</h1>
+            <p>簡易測試範例 - 使用現有的 public/assets/js/app.js</p>
+        </header>
+        
+        <main id="app">
+            <!-- UI 將由 app.js 自動生成 -->
+        </main>
+        
+        <footer>
+            <p>VoiceBank Recorder v1.0.0 | 使用 RecordRTC + Web Audio API</p>
+        </footer>
+    </div>
+    
+    <!-- 載入依賴 -->
+    <script src="../../public/assets/js/RecordRTC.js"></script>
+    <!-- 載入主程式 -->
+    <script src="../../public/assets/js/app.js"></script>
+    
+    <script>
+        // 頁面載入後自動初始化
+        window.addEventListener('DOMContentLoaded', () => {
+            console.log('=== VoiceBank Recorder Test Page ===');
+            console.log('RecordRTC loaded:', typeof RecordRTC !== 'undefined');
+            console.log('App.js loaded:', typeof window.VoiceBankRecorder !== 'undefined');
+            
+            // 檢查是否有全域變數
+            if (typeof window.VoiceBankRecorder === 'undefined') {
+                console.warn('VoiceBankRecorder 未載入，請檢查 app.js');
+            }
+        });
+    </script>
+</body>
+</html>

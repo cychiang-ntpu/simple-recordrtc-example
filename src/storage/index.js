@@ -34,7 +34,6 @@ export class StorageFactory {
     switch (type.toLowerCase()) {
       case 'browser':
       case 'indexeddb':
-        const { IndexedDBAdapter } = require('./IndexedDBAdapter.js');
         return new IndexedDBAdapter(
           options.dbName,
           options.storeName,
@@ -42,17 +41,14 @@ export class StorageFactory {
         );
       
       case 'electron':
-        const { ElectronAdapter } = require('./ElectronAdapter.js');
         return new ElectronAdapter(options.savePath);
       
       case 'capacitor':
-        const { CapacitorAdapter } = require('./CapacitorAdapter.js');
         return new CapacitorAdapter(options.directory);
       
       case 'server':
       case 'php':
       case 'nodejs':
-        const { ServerAdapter } = require('./ServerAdapter.js');
         return new ServerAdapter(options);
       
       default:
@@ -68,18 +64,15 @@ export class StorageFactory {
   static createAuto(options = {}) {
     // 檢查 Electron
     if (typeof window !== 'undefined' && window.electronAPI) {
-      const { ElectronAdapter } = require('./ElectronAdapter.js');
       return new ElectronAdapter(options.savePath);
     }
     
     // 檢查 Capacitor
     if (typeof window !== 'undefined' && window.Capacitor) {
-      const { CapacitorAdapter } = require('./CapacitorAdapter.js');
       return new CapacitorAdapter(options.directory);
     }
     
     // 預設使用 IndexedDB（瀏覽器）
-    const { IndexedDBAdapter } = require('./IndexedDBAdapter.js');
     return new IndexedDBAdapter(
       options.dbName,
       options.storeName,

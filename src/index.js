@@ -137,7 +137,7 @@ export class VoiceBankRecorder {
    * @returns {StorageAdapter}
    */
   createStorageAdapter(storageConfig) {
-    const { StorageFactory } = require('./storage/index.js');
+    // 使用已導入的 StorageFactory
     return StorageFactory.create({
       type: storageConfig.type || 'auto',
       options: storageConfig
